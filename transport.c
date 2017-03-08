@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <errno.h>
+//TODO: make it possible to end the connection
 
 #define GO_BACK 32 // should be a power of two to correctly handle unsigned overflow in the ring buffer
 #define HEADER_SIZE 16
