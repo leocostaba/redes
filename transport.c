@@ -60,6 +60,7 @@ int send_segment(Connection* conn, uint8_t* buf);
 int receive_segment(Connection* conn, uint8_t* buf);
 void timer(Connection* conn);
 void process_segment(Connection* conn, uint8_t* segment);
+void print_segment_type(uint32_t type);
 
 int start_server(const on_init_t on_init, const on_receive_t on_receive) {
     // Establish the network-layer channel
@@ -168,6 +169,9 @@ int validate_segment(uint8_t* const segment) {
 }
 
 int send_segment(Connection* const conn, uint8_t* const segment) {
+    printf("Sending segment: %u (", read_uint32(segment+8));
+    print_segment_type(read_uint32(segment+4));
+    puts(")");
     // Simplified error checking: the xor of all (32-bit) words must be zero
     segment[0] = 0;
     segment[1] = 0;
@@ -217,11 +221,14 @@ void timer(Connection* const conn) {
 }
 
 void process_segment(Connection* const conn, uint8_t* const segment) {
+    printf("Receiving segment: %u (", read_uint32(segment+8));
+    print_segment_type(read_uint32(segment+4));
+    puts(")");
     // Handle handshakes
     if (read_uint32(segment+4) == SEGMENT_TYPE_INIT) {
         if (conn->type == CONNECTION_TYPE_SERVER) {
             if (conn->server_status == SERVER_STATUS_DISCONNECTED) {
-                puts("Received first INIT ACK");
+                puts("Received first INIT");
                 // After receiving the first handshake, we need to setup the connection and reply
                 conn->server_status = SERVER_STATUS_RECEIVED_INIT;
                 conn->sender_nseq = read_uint32(segment+8);
@@ -233,7 +240,7 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
             } else if (conn->server_status == SERVER_STATUS_RECEIVED_INIT) {
                 if (read_uint32(segment+8) == conn->receiver_nseq) {
 
-                    puts("Received repeated INIT ACK");
+                    puts("Received repeated INIT");
                     // After receiving duplicates of the initial handshake (presumably because our ACK was lost), we also need to reply
                     // We may assume that "sender_nseq" has not been changed since we use three-way handshaking
                     uint8_t response[SEGMENT_SIZE];
@@ -242,7 +249,7 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
                     send_segment(conn, response);
                 } else {
                     // Presumably someone is trying to start another connection while this one is still active
-                    puts("Received INIT ACK with an invalid sequence number");
+                    puts("Received INIT with an invalid sequence number");
                 }
             }
         }
@@ -273,17 +280,24 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
     }
     // Handle common messages
     if (read_uint32(segment+4) == SEGMENT_TYPE_MESSAGE) {
+        const uint32_t nseq = read_uint32(segment+8);
         // If this is the first message, mark the three-way handhsake as complete and call "on_init"
         if (conn->server_status == SERVER_STATUS_RECEIVED_INIT) {
             conn->server_status = SERVER_STATUS_CONNECTED;
             conn->on_init(conn);
         }
         // If the message is new (and sequential), forward it to the upper layer
-        if (read_uint32(segment+8) == conn->receiver_nseq) {
+        if (nseq == conn->receiver_nseq) {
             const uint32_t payload_size = read_uint32(segment+12);
             conn->on_receive(conn, segment+16, payload_size);
             ++conn->receiver_nseq;
         }
+        // Send ACK
+        uint8_t response[SEGMENT_SIZE];
+        write_uint32(response+4, SEGMENT_TYPE_MESSAGE_ACK);
+        write_uint32(response+8, nseq);
+        send_segment(conn, response);
+        // Return
         return;
     }
 }
@@ -304,4 +318,18 @@ ssize_t send_message(Connection* const conn, const uint8_t* const buf, const siz
         ++conn->segments_end;
     }
     return bwritten;
+}
+
+void print_segment_type(const uint32_t type) {
+    if (type == SEGMENT_TYPE_INIT) {
+        printf("INIT");
+    } else if (type == SEGMENT_TYPE_INIT_ACK) {
+        printf("INIT_ACK");
+    } else if (type == SEGMENT_TYPE_MESSAGE) {
+        printf("MESSAGE");
+    } else if (type == SEGMENT_TYPE_MESSAGE_ACK) {
+        printf("MESSAGE_ACK");
+    } else {
+        printf("???");
+    }
 }
