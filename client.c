@@ -1,5 +1,6 @@
 #include "transport.h"
 #include <stdio.h>
+//TODO: add thread
 
 void on_init(Connection* const conn) {
     puts("(client) Connection initialized");
