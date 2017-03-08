@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #define MAX_REMOTE_FILENAME_LEN 200
+#define MAX_LOCAL_FILENAME_LEN 200
 #define MAX_STATUS_MESSAGE_LEN 200
 //TODO: add thread
 
@@ -56,7 +57,23 @@ int run_get(const char* const local_filename, const char* const remote_filename)
 }
 
 int run_put(const char* const local_filename, const char* const remote_filename) {
-    return 0;
+   const size_t local_filename_len = strlen(local_filename);
+    if (local_filename_len > MAX_LOCAL_FILENAME_LEN) {
+        printf("local filename is too long: %s\n", local_filename);
+        return 1;
+    }
+    file = fopen(remote_filename, "r");
+    if (file == 0) {
+        printf("unable to open file: %s\n", remote_filename);
+        return 1;
+    }
+    initial_message[0] = 'P';
+    initial_message[1] = 'U';
+    initial_message[2] = 'T';
+    memcpy(initial_message+3, local_filename, local_filename_len);
+    initial_message[3+local_filename_len] = '\0';
+    const int ret = start_client(on_init, on_receive);
+    return ret;
 }
 
 int main(int argc, char** argv) {
