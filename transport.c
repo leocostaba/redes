@@ -317,6 +317,7 @@ ssize_t send_message(Connection* const conn, const uint8_t* const buf, const siz
         memcpy(segment+16, payload_begin, payload_size);
         send_segment(conn, segment);
         ++conn->segments_end;
+        ++conn->sender_nseq;
     }
     return bwritten;
 }
