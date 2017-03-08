@@ -261,18 +261,18 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
         const uint32_t nseq = read_uint32(segment+8);
         // Just ignore the ACK if currently there are no segments in te window
         if (conn->segments_beg == conn->segments_end) {
-            printf("(transport) Received message ACK with nseq=%u (ignoring due to empty window)", nseq);
+            printf("(transport) Received message ACK with nseq=%u (ignoring due to empty window)\n", nseq);
             return;
         }
         // Also ignore duplicate ACKs (the assumption that packets are never reordered is important here)
         if (read_uint32(conn->segments[conn->segments_beg%GO_BACK]) == nseq+1) {
-            printf("(transport) Received duplicate message ACK with nseq=%u", nseq);
+            printf("(transport) Received duplicate message ACK with nseq=%u\n", nseq);
             return;
         }
         // Otherwise, repeatedly advance the window
-        printf("(transport) Received cumulative message ACK with nseq=%u", nseq);
+        printf("(transport) Received cumulative message ACK with nseq=%u\n", nseq);
         while (conn->segments_beg != conn->segments_end) {
-            printf("(transport)\tAdvancing sender window by one unit");
+            printf("(transport)\tAdvancing sender window by one unit\n");
             if (read_uint32(conn->segments[(conn->segments_beg++)%GO_BACK]) == nseq) {
                 break;
             }
