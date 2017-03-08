@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <assert.h>
+#include <errno.h>
 
 #define GO_BACK 32 // should be a power of two to correctly handle unsigned overflow in the ring buffer
 #define HEADER_SIZE 16
@@ -58,20 +59,20 @@ void process_segment(Connection* conn, uint8_t* segment);
 
 int start_server(const on_init_t on_init, const on_receive_t on_receive) {
     // Establish the network-layer channel
-    // TODO: remove previously created files?
-    if (mkfifo(filename_clienttoserver, 0666) != 0)
+    // TODO: only create the files if they don't already exist
+   if (mkfifo(filename_clienttoserver, 0666) != 0)
         return -1;
     if (mkfifo(filename_servertoclient, 0666) != 0)
         return -1;
+    puts("Starting server...");
     Connection conn;
     conn.type = CONNECTION_TYPE_SERVER;
-    conn.readpipe = open(filename_clienttoserver, O_RDONLY);
+    conn.readpipe = open(filename_clienttoserver, O_RDONLY | O_NONBLOCK);
     if (conn.readpipe == -1)
         return -1;
-    conn.writepipe = open(filename_servertoclient, O_WRONLY);
-    if (conn.writepipe == -1) {
-        close(conn.readpipe);
-        return -1;
+    puts("Opening write pipe...");
+    while ((conn.writepipe = open(filename_servertoclient, O_WRONLY | O_NONBLOCK)) == -1) {
+        sleep_ms(10);
     }
     conn.on_init = on_init;
     conn.on_receive = on_receive;
@@ -80,19 +81,21 @@ int start_server(const on_init_t on_init, const on_receive_t on_receive) {
     conn.segments_end = 0;
     conn.timer_counter = 0;
     // Start event loop
+    puts("Starting event loop...");
     return start_event_loop(&conn);
 }
 
 int start_client(const on_init_t on_init, const on_receive_t on_receive) {
     // Establish the network-layer channel
+    puts("Starting client...");
     Connection conn;
     conn.type = CONNECTION_TYPE_CLIENT;
-    conn.readpipe = open(filename_servertoclient, O_RDONLY);
-    if (conn.readpipe == -1)
+    conn.writepipe = open(filename_clienttoserver, O_WRONLY | O_NONBLOCK);
+    if (conn.writepipe == -1)
         return -1;
-    conn.writepipe = open(filename_clienttoserver, O_WRONLY);
-    if (conn.writepipe == -1) {
-        close(conn.readpipe);
+    conn.readpipe = open(filename_servertoclient, O_RDONLY | O_NONBLOCK);
+    if (conn.readpipe == -1) {
+        close(conn.writepipe);
         return -1;
     }
     conn.on_init = on_init;
@@ -101,17 +104,21 @@ int start_client(const on_init_t on_init, const on_receive_t on_receive) {
     conn.segments_end = 0;
     conn.timer_counter = 0;
     // Send a special segment to initiate the transport-layer connection
+    puts("Sending special handshake segment...");
     uint8_t segment[SEGMENT_SIZE];
     for (int i = 0; i < 50; ++i) {
+        printf("\tAttempt #%d\n", i);
         const uint32_t nseq = 42; // TODO: random sequence number
         memset(segment, 0, SEGMENT_SIZE);
         write_uint32(segment+4, SEGMENT_TYPE_INIT);
-        write_uint32(segment+8, conn.sender_nseq);
+        write_uint32(segment+8, nseq);
+        send_segment(&conn, segment);
         sleep_ms(100);
         if (receive_segment(&conn, segment) != 0 && validate_segment(segment) && read_uint32(segment+8) == nseq) {
             // Success: start event loop
             conn.sender_nseq = nseq+1;
             conn.receiver_nseq = nseq;
+            puts("Starting event loop...");
             return start_event_loop(&conn);
         }
     }
@@ -168,11 +175,19 @@ int receive_segment(Connection* const conn, uint8_t* const buf) {
     const ssize_t bread = read(conn->readpipe, buf, SEGMENT_SIZE);
     if (bread == 0)
         return 0;
-    if (bread == -1)
-        exit(1);
-    if ((size_t) bread < SEGMENT_SIZE)
+    if (bread == -1) {
+        if (errno == EAGAIN) {
+            return 0;
+        } else {
+            printf("ERROR: receive_segment: bread = -1, errno = %d\n", errno);
+            exit(1);
+        }
+    }
+    if ((size_t) bread < SEGMENT_SIZE) {
+        puts("ERROR: receive_segment: bread < SEGMENT_SIZE");
         exit(2);
-    return 0;
+    }
+    return bread;
 }
 
 void timer(Connection* const conn) {
@@ -192,19 +207,22 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
     if (read_uint32(segment+4) == SEGMENT_TYPE_INIT) {
         if (conn->type == CONNECTION_TYPE_SERVER) {
             if (!conn->connected) {
+                puts("Received first INIT ACK");
                 // After receiving the first handshake, we need to setup the connection and reply
                 conn->connected = 1;
-                conn->receiver_nseq = read_uint32(segment+8);
-                conn->sender_nseq = conn->receiver_nseq + 1;
+                conn->sender_nseq = read_uint32(segment+8);
+                conn->receiver_nseq = conn->sender_nseq + 1;
                 uint8_t response[SEGMENT_SIZE];
                 write_uint32(response+4, SEGMENT_TYPE_INIT_ACK);
-                write_uint32(response+8, conn->receiver_nseq);
+                write_uint32(response+8, conn->sender_nseq);
                 send_segment(conn, response);
-            } else if (read_uint32(segment+8)+1 == conn->receiver_nseq) {
+            } else if (read_uint32(segment+8) == conn->receiver_nseq) {
+                puts("Received repeated INIT ACK");
                 // After receiving duplicates of the initial handshake (presumably because our ACK was lost), we also need to reply
+                // We may assume that "sender_nseq" has not been changed due to the three-way handshaking
                 uint8_t response[SEGMENT_SIZE];
                 write_uint32(response+4, SEGMENT_TYPE_INIT_ACK);
-                write_uint32(response+8, conn->receiver_nseq);
+                write_uint32(response+8, conn->sender_nseq);
                 send_segment(conn, response);
             }
         }
@@ -212,11 +230,24 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
     }
     // Handle ACKs
     if (read_uint32(segment+4) == SEGMENT_TYPE_MESSAGE_ACK) {
-        const uint32_t new_receiver_nseq = read_uint32(segment+8);
-        while (conn->receiver_nseq != new_receiver_nseq) {
-            assert(read_uint32(conn->segments[conn->segments_beg%GO_BACK]+8) == conn->receiver_nseq);
-            ++conn->segments_beg;
-            ++conn->receiver_nseq;
+        const uint32_t nseq = read_uint32(segment+8);
+        // Just ignore the ACK if currently there are no segments in te window
+        if (conn->segments_beg == conn->segments_end) {
+            printf("Received message ACK with nseq=%u (ignoring due to empty window)", nseq);
+            return;
+        }
+        // Also ignore duplicate ACKs (the assumption that packets are never reordered is important here)
+        if (read_uint32(conn->segments[conn->segments_beg%GO_BACK]) == nseq+1) {
+            printf("Received duplicate message ACK with nseq=%u", nseq);
+            return;
+        }
+        // Otherwise, repeatedly advance the window
+        printf("Received cumulative message ACK with nseq=%u", nseq);
+        while (conn->segments_beg != conn->segments_end) {
+            printf("\tAdvancing sender window by one unit");
+            if (read_uint32(conn->segments[(conn->segments_beg++)%GO_BACK]) == nseq) {
+                break;
+            }
         }
         return;
     }
@@ -241,7 +272,8 @@ ssize_t send_message(Connection* const conn, const uint8_t* const buf, const siz
         bwritten += payload_size;
         write_uint32(segment+4, SEGMENT_TYPE_MESSAGE);
         write_uint32(segment+8, conn->sender_nseq);
-        memcpy(segment+12, payload_begin, payload_size);
+        write_uint32(segment+12, payload_size);
+        memcpy(segment+16, payload_begin, payload_size);
         send_segment(conn, segment);
         ++conn->segments_end;
     }
