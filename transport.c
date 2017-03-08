@@ -22,6 +22,10 @@ const uint32_t SEGMENT_TYPE_INIT_ACK = 0x12223242;
 const uint32_t SEGMENT_TYPE_MESSAGE = 0x13233343;
 const uint32_t SEGMENT_TYPE_MESSAGE_ACK = 0x14243444;
 
+const uint8_t SERVER_STATUS_DISCONNECTED = 0;
+const uint8_t SERVER_STATUS_RECEIVED_INIT = 1; // awaiting the first non-INIT segment
+const uint8_t SERVER_STATUS_CONNECTED = 2;     // the three-way handshake is complete
+
 /* segment structure:
  * (4 bytes) (+0) error detection
  * (4 bytes) (+4) segment type
@@ -38,7 +42,7 @@ struct Connection {
     int readpipe, writepipe;
     on_init_t on_init;
     on_receive_t on_receive;
-    uint8_t connected; // only used in the server
+    uint8_t server_status; // only used in the server
     uint32_t sender_nseq, receiver_nseq;
     uint8_t segments[GO_BACK][SEGMENT_SIZE];
     uint32_t segments_beg, segments_end;
@@ -86,7 +90,7 @@ int start_server(const on_init_t on_init, const on_receive_t on_receive) {
     }
     conn.on_init = on_init;
     conn.on_receive = on_receive;
-    conn.connected = 0;
+    conn.server_status = SERVER_STATUS_DISCONNECTED;
     conn.segments_beg = 0;
     conn.segments_end = 0;
     conn.timer_counter = 0;
@@ -125,9 +129,10 @@ int start_client(const on_init_t on_init, const on_receive_t on_receive) {
         send_segment(&conn, segment);
         sleep_ms(100);
         if (receive_segment(&conn, segment) != 0 && validate_segment(segment) && read_uint32(segment+8) == nseq) {
-            // Success: start event loop
+            // Success: call "on_init" and start event loop
             conn.sender_nseq = nseq+1;
             conn.receiver_nseq = nseq;
+            conn.on_init(&conn);
             puts("Starting event loop...");
             return start_event_loop(&conn);
         }
@@ -136,7 +141,6 @@ int start_client(const on_init_t on_init, const on_receive_t on_receive) {
 }
 
 int start_event_loop(Connection* const conn) {
-    conn->on_init(conn);
     uint8_t segment[SEGMENT_SIZE];
     for (;;) {
         // Receive all readily available segments
@@ -216,24 +220,30 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
     // Handle handshakes
     if (read_uint32(segment+4) == SEGMENT_TYPE_INIT) {
         if (conn->type == CONNECTION_TYPE_SERVER) {
-            if (!conn->connected) {
+            if (conn->server_status == SERVER_STATUS_DISCONNECTED) {
                 puts("Received first INIT ACK");
                 // After receiving the first handshake, we need to setup the connection and reply
-                conn->connected = 1;
+                conn->server_status = SERVER_STATUS_RECEIVED_INIT;
                 conn->sender_nseq = read_uint32(segment+8);
                 conn->receiver_nseq = conn->sender_nseq + 1;
                 uint8_t response[SEGMENT_SIZE];
                 write_uint32(response+4, SEGMENT_TYPE_INIT_ACK);
                 write_uint32(response+8, conn->sender_nseq);
                 send_segment(conn, response);
-            } else if (read_uint32(segment+8) == conn->receiver_nseq) {
-                puts("Received repeated INIT ACK");
-                // After receiving duplicates of the initial handshake (presumably because our ACK was lost), we also need to reply
-                // We may assume that "sender_nseq" has not been changed due to the three-way handshaking
-                uint8_t response[SEGMENT_SIZE];
-                write_uint32(response+4, SEGMENT_TYPE_INIT_ACK);
-                write_uint32(response+8, conn->sender_nseq);
-                send_segment(conn, response);
+            } else if (conn->server_status == SERVER_STATUS_RECEIVED_INIT) {
+                if (read_uint32(segment+8) == conn->receiver_nseq) {
+
+                    puts("Received repeated INIT ACK");
+                    // After receiving duplicates of the initial handshake (presumably because our ACK was lost), we also need to reply
+                    // We may assume that "sender_nseq" has not been changed since we use three-way handshaking
+                    uint8_t response[SEGMENT_SIZE];
+                    write_uint32(response+4, SEGMENT_TYPE_INIT_ACK);
+                    write_uint32(response+8, conn->sender_nseq);
+                    send_segment(conn, response);
+                } else {
+                    // Presumably someone is trying to start another connection while this one is still active
+                    puts("Received INIT ACK with an invalid sequence number");
+                }
             }
         }
         return;
@@ -261,8 +271,14 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
         }
         return;
     }
-    // Handle normal messages
+    // Handle common messages
     if (read_uint32(segment+4) == SEGMENT_TYPE_MESSAGE) {
+        // If this is the first message, mark the three-way handhsake as complete and call "on_init"
+        if (conn->server_status == SERVER_STATUS_RECEIVED_INIT) {
+            conn->server_status = SERVER_STATUS_CONNECTED;
+            conn->on_init(conn);
+        }
+        // If the message is new (and sequential), forward it to the upper layer
         if (read_uint32(segment+8) == conn->receiver_nseq) {
             const uint32_t payload_size = read_uint32(segment+12);
             conn->on_receive(conn, segment+16, payload_size);
