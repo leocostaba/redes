@@ -60,10 +60,20 @@ void process_segment(Connection* conn, uint8_t* segment);
 int start_server(const on_init_t on_init, const on_receive_t on_receive) {
     // Establish the network-layer channel
     // TODO: only create the files if they don't already exist
-   if (mkfifo(filename_clienttoserver, 0666) != 0)
-        return -1;
-    if (mkfifo(filename_servertoclient, 0666) != 0)
-        return -1;
+    if (access(filename_clienttoserver, F_OK) == -1) {
+        puts("Pipe \"client-to-server\" does not exist, creating it...");
+        if (mkfifo(filename_clienttoserver, 0666) != 0) {
+            puts("ERROR: Unable to create pipe \"client-to-server\"");
+            return -1;
+        }
+    }
+    if (access(filename_servertoclient, F_OK) == -1) {
+        puts("Pipe \"server-to-client\" does not exist, creating it...");
+        if (mkfifo(filename_servertoclient, 0666) != 0) {
+            puts("ERROR: Unable to create pipe \"server-to-client\"");
+            return -1;
+        }
+    }
     puts("Starting server...");
     Connection conn;
     conn.type = CONNECTION_TYPE_SERVER;
