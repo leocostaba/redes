@@ -43,8 +43,8 @@ void run_get(const char* const local_filename, const char* const remote_filename
     printf("(client) Status message: %s\n", status_message);
     printf("(client) File length: %u\n", (unsigned) file_length);
     if (status_code != 200) {
-        puts("(client) Exiting...");
-        // it's not necessary to terminate the connection here, since the server already does that
+        puts("(client) Waiting for termination...");
+        wait_for_termination(conn);
         return;
     }
     // Forward the file contents to the local file
@@ -62,7 +62,7 @@ void run_get(const char* const local_filename, const char* const remote_filename
     }
     // Exit
     fclose(file);
-    exit(0);
+    wait_for_termination(conn);
 }
 
 void run_put(const char* const local_filename, const char* const remote_filename) {
