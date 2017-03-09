@@ -163,9 +163,11 @@ Connection* start_client() {
         sleep_ms(10);
         if (receive_segment(conn, segment) != 0 && validate_segment(segment) && read_uint32(segment+4) == SEGMENT_TYPE_INIT_ACK && read_uint32(segment+8) == nseq) {
             puts("(transport) Received INIT ACK");
-            // Setup the connection
+            // Finish setting up the connection
             conn->sender_nseq = nseq+1;
             conn->receiver_nseq = nseq;
+            pthread_mutex_init(&conn->read_buffer_mutex, 0);
+            pthread_mutex_init(&conn->write_buffer_mutex, 0);
             // Start the event loop on a separate thread
             puts("(transport) Starting event loop...");
             pthread_t thread;
@@ -357,7 +359,7 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
         }
         return;
     }
-    // Handle ACKs
+    // Handle message ACKs
     if (read_uint32(segment+4) == SEGMENT_TYPE_MESSAGE_ACK) {
         const uint32_t nseq = read_uint32(segment+8);
         // Just ignore the ACK if currently there are no segments in te window
@@ -372,6 +374,7 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
         }
         // Otherwise, repeatedly advance the window
         printf("(transport) Received cumulative message ACK with nseq=%u\n", nseq);
+        conn->timer_counter = 0;
         while (conn->segments_beg != conn->segments_end) {
             printf("(transport) Advancing sender window by one unit\n");
             if (read_uint32(conn->segments[(conn->segments_beg++)%GO_BACK]+8) == nseq) {
