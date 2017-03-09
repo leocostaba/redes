@@ -387,7 +387,7 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
     if (read_uint32(segment+4) == SEGMENT_TYPE_MESSAGE) {
         const uint32_t nseq = read_uint32(segment+8);
         // If this is the first message, mark the three-way handhsake as complete and call "on_init"
-        if (conn->server_status == SERVER_STATUS_RECEIVED_INIT) {
+        if (conn->type == CONNECTION_TYPE_SERVER && conn->server_status == SERVER_STATUS_RECEIVED_INIT) {
             conn->server_status = SERVER_STATUS_CONNECTED;
         }
         // If the message is new (and sequential), append it to the read buffer
