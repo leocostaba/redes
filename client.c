@@ -45,13 +45,13 @@ void run_get(const char* const local_filename, const char* const remote_filename
     const uint32_t file_length = read_uint32(status_response+204);
     printf("(client) Status code: %u\n", (unsigned) status_code);
     printf("(client) Status message: %s\n", status_message);
-    printf("(client) File length: %u\n", (unsigned) file_length);
     if (status_code != 200) {
         puts("(client) Waiting for termination...");
         wait_for_termination(conn);
         fclose(file);
         return;
     }
+    printf("(client) File length: %u\n", (unsigned) file_length);
     // Forward file contents to the local file
     size_t total_bytes = 0;
     uint8_t buffer[BUFFER_SIZE];
