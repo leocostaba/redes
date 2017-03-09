@@ -59,7 +59,7 @@ void run_get(const char* const local_filename, const char* const remote_filename
         if (bread == 0) {
             sleep_ms(5);
         } else {
-            printf("Read %d bytes\n", (int) bread);
+            printf("(client) Read %d bytes\n", (int) bread);
             fwrite(buffer, 1, bread, file);
             total_bytes += bread;
         }
