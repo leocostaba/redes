@@ -8,3 +8,19 @@ Alunos:
 - Lennon Roseira
 - Leonardo Costa
 - Nailane Oliveira
+
+#Como usar
+
+São aceitos os comandos:
+- GET 
+- PUT
+
+Ambos seguidos de dois argumentos, ficando assim:
+
+```sh 
+ $ GET destino.ext envio.ext
+```
+```
+sh 
+ $ PUT envio.ext destino.ext
+```
