@@ -57,6 +57,10 @@ int main() {
         puts("======================================================");
         puts("(server) Starting server...");
         Connection* conn = start_server();
+        if (!conn) {
+            puts("(server) ERROR: unable to start the connection");
+            return 1;
+        }
         puts("(server) Connection initialized");
         // Read the first message
         uint8_t message[MAX_REMOTE_FILENAME_LEN+7];

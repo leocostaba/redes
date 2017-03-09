@@ -10,13 +10,13 @@ void run_get(const char* const local_filename, const char* const remote_filename
     // Validate the remote filename
     const size_t remote_filename_len = strlen(remote_filename);
     if (remote_filename_len > MAX_REMOTE_FILENAME_LEN) {
-        printf("remote filename is too long: %s\n", remote_filename);
+        printf("(client) ERROR: remote filename is too long: %s\n", remote_filename);
         exit(1);
     }
     // Open the local filename for write
     FILE* file = fopen(local_filename, "w");
     if (file == 0) {
-        printf("unable to open file: %s\n", local_filename);
+        printf("(client) ERROR: unable to open file: %s\n", local_filename);
         exit(1);
     }
     // Build the initial message
@@ -28,6 +28,10 @@ void run_get(const char* const local_filename, const char* const remote_filename
     initial_message[3+remote_filename_len] = '\0';
     // Start the connection
     Connection* conn = start_client();
+    if (!conn) {
+        puts("(client) ERROR: unable to start the connection");
+        exit(1);
+    }
     puts("(client) Connection initialized");
     // Send the initial message
     puts("(client) Sending initial message");
@@ -75,7 +79,7 @@ void run_put(const char* const local_filename, const char* const remote_filename
 
 int main(int argc, char** argv) {
     if (argc != 4) {
-        printf("expected 3 arguments, received %d\n", argc-1);
+        printf("(client) ERROR: expected 3 arguments, received %d\n", argc-1);
         return 1;
     }
     if (strcmp(argv[1], "GET") == 0) {
@@ -83,7 +87,7 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[1], "PUT") == 0) {
         run_put(argv[2], argv[3]);
     } else {
-        printf("invalid method %s, expected GET or PUT\n", argv[1]);
+        printf("(client) ERROR: invalid method %s, expected GET or PUT\n", argv[1]);
         return -1;
     }
     return 0;
