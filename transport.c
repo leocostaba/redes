@@ -65,7 +65,6 @@ void print_segment_type(uint32_t type);
 
 int start_server(const on_init_t on_init, const on_receive_t on_receive) {
     // Establish the network-layer channel
-    // TODO: only create the files if they don't already exist
     if (access(filename_clienttoserver, F_OK) == -1) {
         puts("(transport) Pipe \"client-to-server\" does not exist, creating it...");
         if (mkfifo(filename_clienttoserver, 0666) != 0) {
