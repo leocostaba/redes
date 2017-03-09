@@ -309,8 +309,11 @@ void timer(Connection* const conn) {
     ++conn->timer_counter;
     if (conn->timer_counter == 100) { // timeout of 1s
         // Resend segments
-        for (uint32_t i = conn->segments_beg; i != conn->segments_end; ++i) {
-            send_segment(conn, conn->segments[i%GO_BACK]);
+        if (conn->segments_beg != conn->segments_end) {
+            puts("(transport) Timeout, resending all segments in the window...");
+            for (uint32_t i = conn->segments_beg; i != conn->segments_end; ++i) {
+                send_segment(conn, conn->segments[i%GO_BACK]);
+            }
         }
         // Restart counter
         conn->timer_counter = 0;
