@@ -41,6 +41,7 @@ void run_get(Connection* const conn, const uint8_t* const message) {
         if (bread == 0) {
             puts("(server) Sent the last block, terminating the connection...");
             terminate_connection(conn);
+            fclose(file);
             return;
         }
         puts("(server) Sending a new block");
@@ -64,7 +65,6 @@ void run_put(Connection* const conn, const uint8_t* const message) {
         send_message_blocking(conn, response, MAX_STATUS_MESSAGE_LEN+8);
         puts("(server) Terminating the connection");
         terminate_connection(conn);
-        fclose(file);
         return;
     }
     // If it succeeds, reply with a success message
@@ -93,8 +93,8 @@ void run_put(Connection* const conn, const uint8_t* const message) {
     }
     // And finally exit
     puts("(server) Waiting for termination...");
-    fclose(file);
     wait_for_termination(conn);
+    fclose(file);
 }
 
 int main() {

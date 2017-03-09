@@ -71,8 +71,8 @@ void run_get(const char* const local_filename, const char* const remote_filename
     }
     // Exit
     puts("(client) Waiting for termination...");
-    fclose(file);
     wait_for_termination(conn);
+    fclose(file);
 }
 
 void run_put(const char* const local_filename, const char* const remote_filename) {
@@ -130,6 +130,7 @@ void run_put(const char* const local_filename, const char* const remote_filename
         if (bread == 0) {
             puts("(client) Sent the last block, terminating the connection...");
             terminate_connection(conn);
+            fclose(file);
             return;
         }
         puts("(client) Sending a new block");
