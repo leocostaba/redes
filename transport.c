@@ -220,7 +220,7 @@ void* start_event_loop(void* const conn_) {
         // Send as many segments as possible
         pthread_mutex_lock(&conn->write_buffer_mutex);
         while (conn->segments_end != conn->segments_beg+GO_BACK && conn->write_buffer_beg != conn->write_buffer_end) {
-            uint8_t segment[SEGMENT_SIZE];
+            uint8_t* segment = conn->segments[conn->segments_end%GO_BACK];
             size_t payload_size = 0;
             while (payload_size < MAX_PAYLOAD_SIZE && conn->write_buffer_beg != conn->write_buffer_end) {
                 segment[16+payload_size] = conn->write_buffer[conn->write_buffer_beg%BUFFER_SIZE];
@@ -369,7 +369,7 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
         printf("(transport) Received cumulative message ACK with nseq=%u\n", nseq);
         while (conn->segments_beg != conn->segments_end) {
             printf("(transport) Advancing sender window by one unit\n");
-            if (read_uint32(conn->segments[(conn->segments_beg++)%GO_BACK]) == nseq) {
+            if (read_uint32(conn->segments[(conn->segments_beg++)%GO_BACK]+8) == nseq) {
                 break;
             }
         }
