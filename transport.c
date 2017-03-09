@@ -160,7 +160,7 @@ Connection* start_client() {
         write_uint32(segment+4, SEGMENT_TYPE_INIT);
         write_uint32(segment+8, nseq);
         send_segment(conn, segment);
-        sleep_ms(1000);
+        sleep_ms(10);
         if (receive_segment(conn, segment) != 0 && validate_segment(segment) && read_uint32(segment+4) == SEGMENT_TYPE_INIT_ACK && read_uint32(segment+8) == nseq) {
             puts("(transport) Received INIT ACK");
             // Setup the connection
