@@ -49,11 +49,12 @@ void run_get(Connection* const conn, const uint8_t* const message) {
 }
 
 void run_put(Connection* const conn, const uint8_t* const message) {
-    // Open the file for read access
-    char filename[MAX_LOCAL_FILENAME_LEN+1];
-    memcpy(filename, message+3, MAX_LOCAL_FILENAME_LEN);
+    // Open the file for write access
+    char filename[MAX_REMOTE_FILENAME_LEN+1];
+    memcpy(filename, message+3, MAX_REMOTE_FILENAME_LEN);
     printf("(server) Opening file for read access: %s\n", filename);
-    FILE* file = fopen(filename, "r");
+    FILE* file = fopen(filename, "w");
+    uint32_t file_length = read_uint32(message+203);
     // If it fails, reply with a failure message and terminate the connection
     if (file == 0) {
         puts("(server) Unable to open the file: replying with failure");
@@ -63,31 +64,37 @@ void run_put(Connection* const conn, const uint8_t* const message) {
         send_message_blocking(conn, response, MAX_STATUS_MESSAGE_LEN+8);
         puts("(server) Terminating the connection");
         terminate_connection(conn);
+        fclose(file);
         return;
     }
-    // If it succeeds, reply with a success message containing the file length
-    fseek(file, 0, SEEK_END);
-    const uint32_t file_length = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    // If it succeeds, reply with a success message
     uint8_t response[MAX_STATUS_MESSAGE_LEN+8];
     puts("(server) Success opening the file: replying with the file length");
     write_uint32(response, 200);
     strcpy((char*) response+4, "OK");
-    write_uint32(response+204, file_length);
     send_message_blocking(conn, response, MAX_STATUS_MESSAGE_LEN+8);
-    // And then send the file contents
-    puts("(server) Geting file contents...");
+    // Then forward file contents to the destination file
+    puts("(server) Receiving file contents...");
+    size_t total_bytes = 0;
     uint8_t buffer[BUFFER_SIZE];
-    for (;;) {
-        size_t bread = fread(buffer, 1, BUFFER_SIZE, file);
-        if (bread == 0) {
-            puts("(server) Get the last block, terminating the connection...");
-            terminate_connection(conn);
-            return;
+    while (total_bytes < file_length) {
+        const ssize_t bread = receive_message(conn, buffer, BUFFER_SIZE);
+        if (bread < 0) {
+            puts("(client) ERROR: receive_message failed!");
+            exit(1);
         }
-        puts("(server) Geting a new block");
-        send_message_blocking(conn, buffer, bread);
+        if (bread == 0) {
+            sleep_ms(5);
+        } else {
+            printf("(client) Read %d bytes\n", (int) bread);
+            fwrite(buffer, 1, bread, file);
+            total_bytes += bread;
+        }
     }
+    // And finally exit
+    puts("(server) Waiting for termination...");
+    fclose(file);
+    wait_for_termination(conn);
 }
 
 int main() {
