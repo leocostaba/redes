@@ -56,9 +56,13 @@ void run_get(const char* const local_filename, const char* const remote_filename
             puts("(client) ERROR: receive_message failed!");
             exit(1);
         }
-        printf("Read %d bytes\n", (int) bread);
-        fwrite(buffer, 1, bread, file);
-        total_bytes += bread;
+        if (bread == 0) {
+            sleep_ms(5);
+        } else {
+            printf("Read %d bytes\n", (int) bread);
+            fwrite(buffer, 1, bread, file);
+            total_bytes += bread;
+        }
     }
     // Exit
     fclose(file);

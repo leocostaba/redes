@@ -274,14 +274,16 @@ int send_segment(Connection* const conn, uint8_t* const segment) {
         for (int i = 4+s; i < SEGMENT_SIZE; i += 4)
             segment[s] ^= segment[i];
     // Send segment
-    const ssize_t bwritten = write(conn->writepipe, segment, SEGMENT_SIZE);
-    if (bwritten == -1) {
-        puts("(transport) ERROR: unable to write bytes to the write pipe");
-        exit(1);
-    }
-    if ((size_t) bwritten < SEGMENT_SIZE) {
-        puts("(transport) ERROR: unable to write enough bytes to the write pipe");
-        exit(2);
+    for (;;) {
+        const ssize_t bwritten = write(conn->writepipe, segment, SEGMENT_SIZE);
+        if (bwritten == SEGMENT_SIZE) {
+            break;
+        }
+        if ((size_t) bwritten < SEGMENT_SIZE) {
+            puts("(transport) ERROR: unable to write enough bytes to the write pipe");
+            exit(2);
+        }
+        sleep_ms(5);
     }
     return 0;
 }
