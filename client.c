@@ -70,6 +70,7 @@ void run_get(const char* const local_filename, const char* const remote_filename
         }
     }
     // Exit
+    puts("(client) Waiting for termination...");
     fclose(file);
     wait_for_termination(conn);
 }
@@ -127,16 +128,13 @@ void run_put(const char* const local_filename, const char* const remote_filename
     for (;;) {
         size_t bread = fread(buffer, 1, BUFFER_SIZE, file);
         if (bread == 0) {
-            puts("(server) Get the last block, terminating the connection...");
+            puts("(client) Sent the last block, terminating the connection...");
             terminate_connection(conn);
             return;
         }
-        puts("(server) Geting a new block");
+        puts("(client) Sending a new block");
         send_message_blocking(conn, buffer, bread);
     }
-    // Exit
-    fclose(file);
-    wait_for_termination(conn);
 }
 
 int main(int argc, char** argv) {
