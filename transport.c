@@ -11,17 +11,20 @@
 #include <unistd.h>
 #include <assert.h>
 #include <errno.h>
-//TODO: make it possible to end the connection
+#include <pthread.h>
 
 #define GO_BACK 32 // should be a power of two to correctly handle unsigned overflow in the ring buffer
 #define HEADER_SIZE 16
 #define MAX_PAYLOAD_SIZE 1500
 #define SEGMENT_SIZE (HEADER_SIZE+MAX_PAYLOAD_SIZE)
+#define BUFFER_SIZE (1<<16) // should be a power of two to correctly handle unsigned overflow in the ring buffer
 
 const uint32_t SEGMENT_TYPE_INIT = 0x11213141;
 const uint32_t SEGMENT_TYPE_INIT_ACK = 0x12223242;
 const uint32_t SEGMENT_TYPE_MESSAGE = 0x13233343;
 const uint32_t SEGMENT_TYPE_MESSAGE_ACK = 0x14243444;
+const uint32_t SEGMENT_TYPE_BYE = 0x15253545;
+const uint32_t SEGMENT_TYPE_BYE_ACK = 0x16263646;
 
 const uint8_t SERVER_STATUS_DISCONNECTED = 0;
 const uint8_t SERVER_STATUS_RECEIVED_INIT = 1; // awaiting the first non-INIT segment
@@ -30,7 +33,7 @@ const uint8_t SERVER_STATUS_CONNECTED = 2;     // the three-way handshake is com
 /* segment structure:
  * (4 bytes) (+0) error detection
  * (4 bytes) (+4) segment type
- * (4 bytes) (+8) sequence number
+ * (4 bytes) (+8) sequence number (except for SEGMENT_TYPE_BYE and SEGMENT_TYPE_BYE_ACK)
  * (4 bytes) (+12) payload size (only used for SEGMENT_TYPE_MESSAGE)
  * (remaining bytes) (+16) payload (only used for SEGMENT_TYPE_MESSAGE)
  */
@@ -41,13 +44,16 @@ const char* const filename_clienttoserver = "/tmp/trabalho-redes-transporte-cts"
 struct Connection {
     uint8_t type;
     int readpipe, writepipe;
-    on_init_t on_init;
-    on_receive_t on_receive;
     uint8_t server_status; // only used in the server
+    uint8_t disconnecting;
     uint32_t sender_nseq, receiver_nseq;
     uint8_t segments[GO_BACK][SEGMENT_SIZE];
     uint32_t segments_beg, segments_end;
     uint32_t timer_counter;
+    uint8_t read_buffer[BUFFER_SIZE], write_buffer[BUFFER_SIZE];
+    uint32_t read_buffer_beg, read_buffer_end;
+    uint32_t write_buffer_beg, write_buffer_end;
+    pthread_mutex_t read_buffer_mutex, write_buffer_mutex;
 };
 
 enum {
@@ -55,7 +61,7 @@ enum {
     CONNECTION_TYPE_CLIENT = 1,
 };
 
-int start_event_loop(Connection* conn);
+void* start_event_loop(void* conn);
 int validate_segment(uint8_t* buf);
 int send_segment(Connection* conn, uint8_t* buf);
 int receive_segment(Connection* conn, uint8_t* buf);
@@ -63,97 +69,161 @@ void timer(Connection* conn);
 void process_segment(Connection* conn, uint8_t* segment);
 void print_segment_type(uint32_t type);
 
-int start_server(const on_init_t on_init, const on_receive_t on_receive) {
+Connection* start_server() {
     // Establish the network-layer channel
     if (access(filename_clienttoserver, F_OK) == -1) {
         puts("(transport) Pipe \"client-to-server\" does not exist, creating it...");
         if (mkfifo(filename_clienttoserver, 0666) != 0) {
             puts("(transport) ERROR: Unable to create pipe \"client-to-server\"");
-            return -1;
+            return 0;
         }
     }
     if (access(filename_servertoclient, F_OK) == -1) {
         puts("(transport) Pipe \"server-to-client\" does not exist, creating it...");
         if (mkfifo(filename_servertoclient, 0666) != 0) {
             puts("(transport) ERROR: Unable to create pipe \"server-to-client\"");
-            return -1;
+            return 0;
         }
     }
     puts("(transport) Starting server...");
-    Connection conn;
-    conn.type = CONNECTION_TYPE_SERVER;
-    conn.readpipe = open(filename_clienttoserver, O_RDONLY | O_NONBLOCK);
-    if (conn.readpipe == -1)
-        return -1;
+    puts("(transport) Opening read pipe...");
+    const int readpipe = open(filename_clienttoserver, O_RDONLY | O_NONBLOCK);
+    if (readpipe == -1)
+        return 0;
+    int writepipe;
     puts("(transport) Opening write pipe...");
-    while ((conn.writepipe = open(filename_servertoclient, O_WRONLY | O_NONBLOCK)) == -1) {
+    while ((writepipe = open(filename_servertoclient, O_WRONLY | O_NONBLOCK)) == -1) {
         sleep_ms(10);
     }
-    conn.on_init = on_init;
-    conn.on_receive = on_receive;
-    conn.server_status = SERVER_STATUS_DISCONNECTED;
-    conn.segments_beg = 0;
-    conn.segments_end = 0;
-    conn.timer_counter = 0;
-    // Start event loop
+    Connection* conn = malloc(sizeof(Connection)); // TODO: remember to free them memory eventually
+    conn->type = CONNECTION_TYPE_SERVER;
+    conn->readpipe = readpipe;
+    conn->writepipe = writepipe;
+    conn->disconnecting = 0;
+    conn->server_status = SERVER_STATUS_DISCONNECTED;
+    conn->segments_beg = 0;
+    conn->segments_end = 0;
+    conn->timer_counter = 0;
+    conn->read_buffer_beg = 0;
+    conn->read_buffer_end = 0;
+    conn->write_buffer_beg = 0;
+    conn->write_buffer_end = 0;
+    pthread_mutex_init(&conn->read_buffer_mutex, 0); //TODO: remember to free the mutex eventually
+    pthread_mutex_init(&conn->write_buffer_mutex, 0); //TODO: remember to free the mutex eventually
+    // Start event loop in a new thread
     puts("(transport) Starting event loop...");
-    return start_event_loop(&conn);
+    pthread_t thread;
+    pthread_create(&thread, 0, &start_event_loop, conn);
+    // Return the connection pointer (after the handshake is complete)
+    while (conn->server_status != SERVER_STATUS_CONNECTED)
+        sleep_ms(10);
+    return conn;
 }
 
-int start_client(const on_init_t on_init, const on_receive_t on_receive) {
+Connection* start_client() {
     // Establish the network-layer channel
     puts("(transport) Starting client...");
-    Connection conn;
-    conn.type = CONNECTION_TYPE_CLIENT;
-    conn.writepipe = open(filename_clienttoserver, O_WRONLY | O_NONBLOCK);
-    if (conn.writepipe == -1)
-        return -1;
-    conn.readpipe = open(filename_servertoclient, O_RDONLY | O_NONBLOCK);
-    if (conn.readpipe == -1) {
-        close(conn.writepipe);
-        return -1;
+    puts("(transport) Opening write pipe...");
+    int writepipe = open(filename_clienttoserver, O_WRONLY | O_NONBLOCK);
+    if (writepipe == -1)
+        return 0;
+    puts("(transport) Opening read pipe...");
+    int readpipe = open(filename_servertoclient, O_RDONLY | O_NONBLOCK);
+    if (readpipe == -1) {
+        close(writepipe);
+        return 0;
     }
-    conn.on_init = on_init;
-    conn.on_receive = on_receive;
-    conn.segments_beg = 0;
-    conn.segments_end = 0;
-    conn.timer_counter = 0;
+    Connection* conn = malloc(sizeof(Connection));
+    conn->type = CONNECTION_TYPE_CLIENT;
+    conn->readpipe = readpipe;
+    conn->writepipe = writepipe;
+    conn->disconnecting = 0;
+    conn->segments_beg = 0;
+    conn->segments_end = 0;
+    conn->timer_counter = 0;
+    conn->read_buffer_beg = 0;
+    conn->read_buffer_end = 0;
+    conn->write_buffer_beg = 0;
+    conn->write_buffer_end = 0;
     // Send a special segment to initiate the transport-layer connection
     puts("(transport) Sending special handshake segment...");
     uint8_t segment[SEGMENT_SIZE];
     for (int i = 0; i < 50; ++i) {
-        printf("(transport) \tAttempt #%d\n", i);
+        printf("(transport) Attempt #%d\n", i);
         const uint32_t nseq = 42; // TODO: random sequence number
         memset(segment, 0, SEGMENT_SIZE);
         write_uint32(segment+4, SEGMENT_TYPE_INIT);
         write_uint32(segment+8, nseq);
-        send_segment(&conn, segment);
-        sleep_ms(100);
-        if (receive_segment(&conn, segment) != 0 && validate_segment(segment) && read_uint32(segment+8) == nseq) {
-            // Success: call "on_init" and start event loop
-            conn.sender_nseq = nseq+1;
-            conn.receiver_nseq = nseq;
-            conn.on_init(&conn);
+        send_segment(conn, segment);
+        sleep_ms(1000);
+        if (receive_segment(conn, segment) != 0 && validate_segment(segment) && read_uint32(segment+4) == SEGMENT_TYPE_INIT_ACK && read_uint32(segment+8) == nseq) {
+            puts("(transport) Received INIT ACK");
+            // Setup the connection
+            conn->sender_nseq = nseq+1;
+            conn->receiver_nseq = nseq;
+            // Start the event loop on a separate thread
             puts("(transport) Starting event loop...");
-            return start_event_loop(&conn);
+            pthread_t thread;
+            pthread_create(&thread, 0, start_event_loop, conn);
+            // Return the connection pointer
+            return conn;
         }
     }
-    return -1;
+    free(conn);
+    return 0;
 }
 
-int start_event_loop(Connection* const conn) {
+void* start_event_loop(void* const conn_) {
+    Connection* conn = conn_;
     uint8_t segment[SEGMENT_SIZE];
-    for (;;) {
+    // Normal loop
+    while (!conn->disconnecting) {
         // Receive all readily available segments
         while (receive_segment(conn, segment) != 0) {
             if (validate_segment(segment)) {
                 process_segment(conn, segment);
             }
         }
+        // Send as many segments as possible
+        pthread_mutex_lock(&conn->write_buffer_mutex);
+        while (conn->segments_end != conn->segments_beg+GO_BACK && conn->write_buffer_beg != conn->write_buffer_end) {
+            uint8_t segment[SEGMENT_SIZE];
+            size_t payload_size = 0;
+            while (payload_size < MAX_PAYLOAD_SIZE && conn->write_buffer_beg != conn->write_buffer_end) {
+                segment[16+payload_size] = conn->write_buffer[conn->write_buffer_beg%BUFFER_SIZE];
+                ++payload_size;
+                ++conn->write_buffer_beg;
+            }
+            write_uint32(segment+4, SEGMENT_TYPE_MESSAGE);
+            write_uint32(segment+8, conn->sender_nseq);
+            write_uint32(segment+12, payload_size);
+            send_segment(conn, segment);
+            ++conn->segments_end;
+            ++conn->sender_nseq;
+        }
+        pthread_mutex_unlock(&conn->write_buffer_mutex);
         // Call the timer (every 10ms or so)
         timer(conn);
-        // Wait 10ms for new segments to arrive
-        sleep_ms(10);
+        // Wait for new segments to arrive
+        sleep_ms(10); //TODO: change to 10ms
+    }
+    // Termination loop
+    for (int i = 0; i < 50; ++i) {
+        // Send a termination segment
+        puts("(transport) Sending a termination segment");
+        uint8_t segment[SEGMENT_SIZE];
+        memset(segment, 0, SEGMENT_SIZE);
+        write_uint32(segment+4, SEGMENT_TYPE_BYE);
+        write_uint32(segment+8, 0); // the nseq doesn't really matter
+        send_segment(conn, segment);
+        // Wait for new segments to arrive
+        sleep_ms(100);
+        // Receive all readily available segments
+        while (receive_segment(conn, segment) != 0) {
+            if (validate_segment(segment)) {
+                process_segment(conn, segment);
+            }
+        }
     }
     // Connection closed successfully
     return 0;
@@ -169,9 +239,9 @@ int validate_segment(uint8_t* const segment) {
 }
 
 int send_segment(Connection* const conn, uint8_t* const segment) {
-    printf("(transport) Sending segment: %u (", read_uint32(segment+8));
+    printf("(transport) Sending segment: nseq=%u, type=", read_uint32(segment+8));
     print_segment_type(read_uint32(segment+4));
-    puts(")");
+    puts("");
     // Simplified error checking: the xor of all (32-bit) words must be zero
     segment[0] = 0;
     segment[1] = 0;
@@ -182,10 +252,14 @@ int send_segment(Connection* const conn, uint8_t* const segment) {
             segment[s] ^= segment[i];
     // Send segment
     const ssize_t bwritten = write(conn->writepipe, segment, SEGMENT_SIZE);
-    if (bwritten == -1)
+    if (bwritten == -1) {
+        puts("(transport) ERROR: unable to write bytes to the write pipe");
         exit(1);
-    if ((size_t) bwritten < SEGMENT_SIZE)
+    }
+    if ((size_t) bwritten < SEGMENT_SIZE) {
+        puts("(transport) ERROR: unable to write enough bytes to the write pipe");
         exit(2);
+    }
     return 0;
 }
 
@@ -221,9 +295,9 @@ void timer(Connection* const conn) {
 }
 
 void process_segment(Connection* const conn, uint8_t* const segment) {
-    printf("(transport) Receiving segment: %u (", read_uint32(segment+8));
+    printf("(transport) Receiving segment: nseq=%u, type=", read_uint32(segment+8));
     print_segment_type(read_uint32(segment+4));
-    puts(")");
+    puts("");
     // Handle handshakes
     if (read_uint32(segment+4) == SEGMENT_TYPE_INIT) {
         if (conn->type == CONNECTION_TYPE_SERVER) {
@@ -271,7 +345,7 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
         // Otherwise, repeatedly advance the window
         printf("(transport) Received cumulative message ACK with nseq=%u\n", nseq);
         while (conn->segments_beg != conn->segments_end) {
-            printf("(transport)\tAdvancing sender window by one unit\n");
+            printf("(transport) Advancing sender window by one unit\n");
             if (read_uint32(conn->segments[(conn->segments_beg++)%GO_BACK]) == nseq) {
                 break;
             }
@@ -284,41 +358,50 @@ void process_segment(Connection* const conn, uint8_t* const segment) {
         // If this is the first message, mark the three-way handhsake as complete and call "on_init"
         if (conn->server_status == SERVER_STATUS_RECEIVED_INIT) {
             conn->server_status = SERVER_STATUS_CONNECTED;
-            conn->on_init(conn);
         }
-        // If the message is new (and sequential), forward it to the upper layer
+        // If the message is new (and sequential), append it to the read buffer
         if (nseq == conn->receiver_nseq) {
             const uint32_t payload_size = read_uint32(segment+12);
-            conn->on_receive(conn, segment+16, payload_size);
+            // Attempt to write the (entire) message to the read buffer
+            pthread_mutex_lock(&conn->read_buffer_mutex);
+            uint32_t pos = conn->read_buffer_end;
+            size_t bwritten = 0;
+            for (;;) {
+                if (pos == conn->read_buffer_beg+BUFFER_SIZE) {
+                    // there is not enough space in the buffer
+                    pthread_mutex_unlock(&conn->read_buffer_mutex);
+                    return;
+                }
+                conn->read_buffer[pos%BUFFER_SIZE] = segment[16+bwritten];
+                ++pos;
+                if (++bwritten == payload_size) {
+                    break;
+                }
+            }
+            conn->read_buffer_end += bwritten;
+            pthread_mutex_unlock(&conn->read_buffer_mutex);
+            // If we succeeded, we should increase the sequence number
             ++conn->receiver_nseq;
+            // And reply with an ACK
+            uint8_t response[SEGMENT_SIZE];
+            write_uint32(response+4, SEGMENT_TYPE_MESSAGE_ACK);
+            write_uint32(response+8, nseq);
+            send_segment(conn, response);
         }
-        // Send ACK
-        uint8_t response[SEGMENT_SIZE];
-        write_uint32(response+4, SEGMENT_TYPE_MESSAGE_ACK);
-        write_uint32(response+8, nseq);
-        send_segment(conn, response);
         // Return
         return;
     }
-}
-
-ssize_t send_message(Connection* const conn, const uint8_t* const buf, const size_t bytes) {
-    const size_t required_segments = (bytes / MAX_PAYLOAD_SIZE) + (bytes % MAX_PAYLOAD_SIZE != 0);
-    ssize_t bwritten = 0;
-    for (uint32_t s = 0; s < required_segments && conn->segments_beg+GO_BACK != conn->segments_end; ++s) {
-        uint8_t* const segment = conn->segments[conn->segments_end%GO_BACK];
-        const uint8_t* const payload_begin = buf + s*MAX_PAYLOAD_SIZE;
-        const size_t payload_size = s+1 == required_segments ? bytes % MAX_PAYLOAD_SIZE : MAX_PAYLOAD_SIZE;
-        bwritten += payload_size;
-        write_uint32(segment+4, SEGMENT_TYPE_MESSAGE);
-        write_uint32(segment+8, conn->sender_nseq);
-        write_uint32(segment+12, payload_size);
-        memcpy(segment+16, payload_begin, payload_size);
-        send_segment(conn, segment);
-        ++conn->segments_end;
-        ++conn->sender_nseq;
+    // Handle termination
+    if (read_uint32(segment+4) == SEGMENT_TYPE_BYE) {
+        uint8_t response[SEGMENT_SIZE];
+        write_uint32(response+4, SEGMENT_TYPE_BYE_ACK);
+        write_uint32(response+8, 0); // the nseq doesn't really matter
+        send_segment(conn, response);
+        exit(0);
     }
-    return bwritten;
+    if (read_uint32(segment+4) == SEGMENT_TYPE_BYE_ACK) {
+        exit(0);
+    }
 }
 
 void print_segment_type(const uint32_t type) {
@@ -330,7 +413,80 @@ void print_segment_type(const uint32_t type) {
         printf("MESSAGE");
     } else if (type == SEGMENT_TYPE_MESSAGE_ACK) {
         printf("MESSAGE_ACK");
+    } else if (type == SEGMENT_TYPE_BYE) {
+        printf("MESSAGE_BYE");
+    } else if (type == SEGMENT_TYPE_BYE_ACK) {
+        printf("MESSAGE_BYE_ACK");
     } else {
         printf("???");
     }
+}
+
+ssize_t send_message(Connection* const conn, const uint8_t* const buf, const size_t bytes) {
+    // Write as much as possible of the message to the write buffer
+    pthread_mutex_lock(&conn->write_buffer_mutex);
+    size_t bwritten = 0;
+    while (conn->write_buffer_end != conn->write_buffer_beg+BUFFER_SIZE && bwritten < bytes) {
+        conn->write_buffer[conn->write_buffer_end%BUFFER_SIZE] = buf[bwritten];
+        ++conn->write_buffer_end;
+        ++bwritten;
+    }
+    pthread_mutex_unlock(&conn->write_buffer_mutex);
+    if (bwritten != 0) {
+        printf("(transport) Adding message to the buffer: size=%u\n", (unsigned) bwritten);
+    }
+    return bwritten;
+}
+
+ssize_t receive_message(Connection* const conn, uint8_t* const buf, const size_t bytes) {
+    // Read as much as possible from the read buffer
+    pthread_mutex_lock(&conn->read_buffer_mutex);
+    size_t bread = 0;
+    while (conn->read_buffer_beg != conn->read_buffer_end && bread < bytes) {
+        buf[bread] = conn->read_buffer[conn->read_buffer_beg%BUFFER_SIZE];
+        ++conn->read_buffer_beg;
+        ++bread;
+    }
+    pthread_mutex_unlock(&conn->read_buffer_mutex);
+    if (bread != 0) {
+        printf("(transport) Taking message from the buffer: size=%u\n", (unsigned) bread);
+    }
+    return bread;
+}
+
+void send_message_blocking(Connection* const conn, const uint8_t* const buf, const size_t bytes) {
+    size_t pos = 0;
+    while (pos < bytes) {
+        const ssize_t bwritten = send_message(conn, buf+pos, bytes-pos);
+        if (bwritten < 0) {
+            puts("(transport) ERROR: send_message failed!");
+            exit(1);
+        }
+        pos += bwritten;
+        if (pos == bytes)
+            break;
+        sleep_ms(10);
+    }
+}
+
+void receive_message_blocking(Connection* const conn, uint8_t* const buf, const size_t bytes) {
+    size_t pos = 0;
+    while (pos < bytes) {
+        const ssize_t bread = receive_message(conn, buf+pos, bytes-pos);
+        if (bread < 0) {
+            puts("(transport) ERROR: receive_message failed!");
+            exit(1);
+        }
+        pos += bread;
+        if (pos == bytes)
+            break;
+        sleep_ms(10);
+    }
+}
+
+void terminate_connection(Connection* const conn) {
+    puts("(transport) Terminating connection...");
+    conn->disconnecting = 1;
+    while (conn->disconnecting != 0)
+        sleep_ms(10);
 }
