@@ -22,7 +22,7 @@ bool send_datagram(const uint8_t* datagram) {
     if (datagrams_end == datagrams_beg+MAX_DATAGRAMS) {
         return false;
     }
-    memcpy(datagrams[datagrams_beg%MAX_DATAGRAMS], datagram, DATAGRAM_SIZE);
+    memcpy(datagrams[datagrams_end%MAX_DATAGRAMS], datagram, DATAGRAM_SIZE);
     ++datagrams_end;
 }
 
@@ -62,7 +62,7 @@ static int patestCallback( const void *inputBuffer, void *outputBuffer,
     float* out = (float*) outputBuffer;
     for (int i = 0; i < FRAME_SIZE; ++i) {
         for (int j = 0; j < 8; ++j) {
-            const bool bit = frame[i] & (1u<<j);
+            const bool bit = frame[i] >> j;
             const int value = bit ? 1 : -1;
             *out++ = value;
             *out++ = value;
