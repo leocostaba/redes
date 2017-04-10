@@ -20,7 +20,7 @@ bool send_datagram(const uint8_t* datagram) {
     ++datagrams_end;
 }
 
-bool last_bit = 0;
+int iter = 0;
 static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags statusFlags, void *userData)
 {
     // Prevent unused variable warnings
@@ -35,6 +35,13 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         for (int i = 0; i < FRAME_SYNCHRONIZATION_BYTES; ++i)
             frame[i] = synchronization[i];
         // Write datagram content
+#if DOUGLAS_ADAMS==1
+        if ((++iter)&1) {
+            memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The Guide is definitive. Reality is frequently innacurate. In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move.", DATAGRAM_SIZE);
+        } else {
+            memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The following proposition is occasionally useful. I repeat, the following proposition is occasionally useful.", DATAGRAM_SIZE);
+        }
+#else
         if (datagrams_beg == datagrams_end) {
             for (int i = 0; i < DATAGRAM_SIZE; ++i)
                 frame[FRAME_SYNCHRONIZATION_BYTES+i] = 0;
@@ -45,6 +52,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             //}
             //++datagrams_beg; //temporarily commented
         }
+#endif
         // Write checksum (TODO)
     }
     // Convert frame into audio
@@ -81,19 +89,6 @@ static void StreamFinished( void* userData )
 /*******************************************************************/
 int main()
 {
-    // Send some random datagram
-    uint8_t datagram[DATAGRAM_SIZE];
-    for (int i = 0; i < DATAGRAM_SIZE; ++i)
-        datagram[i] = rand();
-    //for (int i = 0; i < DATAGRAM_SIZE; ++i)
-        //datagram[i] = i&1;
-    memset(datagram, 0, sizeof datagram);
-    for (int i = 0; i < DATAGRAM_SIZE; ++i)
-        for (int j = 0; j < 8; ++j)
-            datagram[i] |= (j&1) << j;
-    memset(datagram, 255, sizeof datagram);
-    send_datagram(datagram);
-
     PaStreamParameters outputParameters;
     PaStream *stream;
     PaError err;

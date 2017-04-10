@@ -64,7 +64,6 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         }
     }
     printf("alignment = %d, value = %d\n", best_alignment, best_alignment_value);
-    printf("cutoff = %f\n", avg2_cutoff);
     // Build superframe
     bool superframe[FRAME_SIZE_BITS];
     bool* ptr = superframe;
@@ -75,16 +74,19 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             avg2 += x*x;
         }
         avg2 /= FRAME_MULTIPLIER;
-        avg2 *= 2*3.1415926535;
+        avg2 *= 2*M_PI;
         avg2 = sqrt(avg2);
         *ptr++ = avg2 >= avg2_cutoff;
-        //printf("val = %f\n", avg2);
     }
     const int superframe_size = ptr - superframe;
+    // Print the superframe
+    #if 0
     for (int i = 0; i < superframe_size; ++i)
         printf("superframe[%d] = %d\n", i, (int) superframe[i]);
+    #endif
     // Search for the synchronization pattern
     int pattern_beg = -1;
+    #if DONT_LOOK_FOR_PATTERN==0
     for (int i = 0; i+FRAME_SIZE_BITS <= superframe_size; ++i) {
         ptr = superframe+i;
         bool okay = true;
@@ -96,16 +98,47 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
                     goto next_iteration;
             }
         }
-        puts("show de bola");
-        exit(0);
         pattern_beg = i;
         break;
 next_iteration:;
     }
-    // If no synchronization pattern was found, just save the current frame as leftover bits
+    #endif
+    // Restore datagram
+    if (pattern_beg != -1) {
+        const int datagram_beg = pattern_beg + FRAME_SYNCHRONIZATION_BITS;
+        int datagram[DATAGRAM_SIZE];
+        memset(datagram, 0, sizeof datagram);
+        for (int i = 0; i < DATAGRAM_SIZE; ++i) {
+            for (int j = 7; j >= 0; --j) {
+                datagram[i] |= (superframe[datagram_beg+i*8+7-j]) << j;
+            }
+        }
+        #if DISPLAY_DATAGRAM==1 || DISPLAY_DATAGRAM==2
+        printf("datagram: ");
+        for (int i = 0; i < DATAGRAM_SIZE; ++i) {
+            putchar(datagram[i]);
+        }
+        putchar('\n');
+        #if DISPLAY_DATAGRAM==2
+        exit(0);
+        #endif
+        #endif
+    }
+    // Update the leftover buffer
     if (pattern_beg == -1) {
+        // If no synchronization pattern was found, just save the current buffer as leftover buffer
         memcpy(leftover_buffer, buf, sizeof leftover_buffer);
         leftover_buffer_size = FRAME_REAL_SIZE_BITS;
+    }
+    else {
+        // Otherwise...
+        // superframe[i] is a function of superbuf[best_alignment+i*FRAME_MULTIPLIER, best_alignment+i*FRAME_MULTIPLIER+FRAME_MULTIPLIER-1]
+        leftover_buffer_size = 0;
+        const int frame_end = pattern_beg + FRAME_SIZE_BITS;
+        int pos = best_alignment+frame_end*FRAME_MULTIPLIER;
+        while (pos < superbuf_size) {
+            leftover_buffer[leftover_buffer_size++] = superbuf[pos++];
+        }
     }
     // Return value
     return paContinue;
