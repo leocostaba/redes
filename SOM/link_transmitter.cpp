@@ -37,9 +37,9 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         // Write datagram content
 #if DOUGLAS_ADAMS==1
         if ((++iter)&1) {
-            memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The Guide is definitive. Reality is frequently innacurate. In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move.", DATAGRAM_SIZE);
+            memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The Guide is definitive. Reality is frequently innacurate. In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move. Some more text here just in case someone decides to increase the datagram size even more. Some more text here just in case someone decides to increase the datagram size even more.", DATAGRAM_SIZE);
         } else {
-            memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The following proposition is occasionally useful. I repeat, the following proposition is occasionally useful.", DATAGRAM_SIZE);
+            memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The following proposition is occasionally useful. I repeat, the following proposition is occasionally useful. Some more text here just in case someone decides to increase the datagram size even more. Some more text here just in case someone decides to increase the datagram size even more.", DATAGRAM_SIZE);
         }
 #else
         if (datagrams_beg == datagrams_end) {
@@ -78,23 +78,13 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
     return paContinue;
 }
 
-/*
- * This routine is called by portaudio when playback is done.
- */
-static void StreamFinished( void* userData )
-{
-}
-
-/*******************************************************************/
-int main()
-{
+void start_link_transmitter() {
+    // Initialize portaudio
+    PaError err = Pa_Initialize();
+    if (err != paNoError)
+        goto error;
+    // Setup output parameters
     PaStreamParameters outputParameters;
-    PaStream *stream;
-    PaError err;
-
-    err = Pa_Initialize();
-    if( err != paNoError ) goto error;
-
     outputParameters.device = Pa_GetDefaultOutputDevice(); /* default output device */
     if (outputParameters.device == paNoDevice) {
       fprintf(stderr,"Error: No default output device.\n");
@@ -104,44 +94,35 @@ int main()
     outputParameters.sampleFormat = paFloat32; /* 32 bit floating point output */
     outputParameters.suggestedLatency = Pa_GetDeviceInfo( outputParameters.device )->defaultLowOutputLatency;
     outputParameters.hostApiSpecificStreamInfo = NULL;
-
-    err = Pa_OpenStream(
-              &stream,
-              0, /* no input */
-              &outputParameters,
-              SAMPLE_RATE,
-              FRAME_REAL_SIZE_BITS, // frames per buffer
-              paClipOff,      /* we won't output out of range samples so don't bother clipping them */
-              patestCallback,
-              0);
-    if( err != paNoError ) goto error;
-
-    err = Pa_SetStreamFinishedCallback( stream, &StreamFinished );
-    if( err != paNoError ) goto error;
-
-    err = Pa_StartStream( stream );
-    if( err != paNoError ) goto error;
-
-#define NUM_SECONDS 5
-    printf("Play for %d seconds.\n", NUM_SECONDS );
+    // Start transmitting
+    PaStream *stream;
+    err = Pa_OpenStream(&stream, 0, &outputParameters, SAMPLE_RATE, FRAME_REAL_SIZE_BITS, paClipOff, patestCallback, 0);
+    if (err != paNoError)
+        goto error;
+    err = Pa_StartStream(stream);
+    if (err != paNoError)
+        goto error;
     for (;;) {
         Pa_Sleep(1000);
     }
-
-    err = Pa_StopStream( stream );
-    if( err != paNoError ) goto error;
-
+    err = Pa_StopStream(stream);
+    if (err != paNoError) goto error;
     err = Pa_CloseStream( stream );
-    if( err != paNoError ) goto error;
-
+    if (err != paNoError) goto error;
     Pa_Terminate();
-    printf("Test finished.\n");
-
-    return err;
+    // Exit
+    exit(err);
 error:
     Pa_Terminate();
     fprintf( stderr, "An error occured while using the portaudio stream\n" );
     fprintf( stderr, "Error number: %d\n", err );
     fprintf( stderr, "Error message: %s\n", Pa_GetErrorText( err ) );
-    return err;
+    exit(err);
 }
+
+#if DOUGLAS_ADAMS==1
+int main()
+{
+    start_link_transmitter();
+}
+#endif
