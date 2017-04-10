@@ -5,19 +5,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <portaudio.h>
+#include <pthread.h>
 #include "link.hpp"
 
 #define MAX_DATAGRAMS (32) // should be a power of two to correctly handle unsigned overflow in the ring buffer (not that it will ever happen...)
 
-uint8_t datagrams[MAX_DATAGRAMS][DATAGRAM_SIZE];
-uint32_t datagrams_beg = 0, datagrams_end = 0;
+static pthread_mutex_t datagrams_mutex;
+static uint8_t datagrams[MAX_DATAGRAMS][DATAGRAM_SIZE];
+static uint32_t datagrams_beg = 0, datagrams_end = 0;
 
 bool send_datagram(const uint8_t* datagram) {
+    pthread_mutex_lock(&datagrams_mutex);
     if (datagrams_end == datagrams_beg+MAX_DATAGRAMS) {
+        pthread_mutex_unlock(&datagrams_mutex);
         return false;
     }
     memcpy(datagrams[datagrams_end%MAX_DATAGRAMS], datagram, DATAGRAM_SIZE);
     ++datagrams_end;
+    pthread_mutex_unlock(&datagrams_mutex);
 }
 
 int iter = 0;
@@ -33,7 +38,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
     {
         // Write synchronization bytes
         for (int i = 0; i < FRAME_SYNCHRONIZATION_BYTES; ++i)
-            frame[i] = synchronization[i];
+            frame[i] = link_synchronization_preamble[i];
         // Write datagram content
 #if DOUGLAS_ADAMS==1
         if ((++iter)&1) {
@@ -42,23 +47,21 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The following proposition is occasionally useful. I repeat, the following proposition is occasionally useful. Some more text here just in case someone decides to increase the datagram size even more. Some more text here just in case someone decides to increase the datagram size even more.", DATAGRAM_SIZE);
         }
 #else
+        pthread_mutex_lock(&datagrams_mutex);
         if (datagrams_beg == datagrams_end) {
             for (int i = 0; i < DATAGRAM_SIZE; ++i)
-                frame[FRAME_SYNCHRONIZATION_BYTES+i] = 0;
+                frame[FRAME_SYNCHRONIZATION_BYTES+i] = rand()%2;
         } else {
             memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, datagrams[datagrams_beg%MAX_DATAGRAMS], DATAGRAM_SIZE);
-            //for (int i = 0; i < DATAGRAM_SIZE; ++i) {
-                //frame[FRAME_SYNCHRONIZATION_BYTES+i] = rand();
-            //}
-            //++datagrams_beg; //temporarily commented
+            ++datagrams_beg;
         }
+        pthread_mutex_unlock(&datagrams_mutex);
 #endif
     }
     // Convert frame into audio
-    puts("aqui");
     float* out = (float*) outputBuffer;
     for (int i = 0; i < FRAME_SIZE; ++i) {
-        printf("frame[%d] = %d\n", i, frame[i]);
+        //printf("frame[%d] = %d\n", i, frame[i]);
         for (int j = 7; j >= 0; --j) {
             const bool bit = (frame[i] >> j) & 1;
             //const bool bit = 1;
@@ -67,7 +70,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             //const bool bit = j&1;
             //const bool bit = (j%4)>=2;
             //const bool bit = j>=4;
-            printf("bit=%d\n", (int) bit);
+            //printf("bit=%d\n", (int) bit);
             for (int k = 0; k < FRAME_MULTIPLIER; ++k) {
                 float x = sin((double)2*M_PI*k/FRAME_MULTIPLIER*FRAME_SINE_FREQUENCY);
                 *out++ = bit ? x : 0;
@@ -79,6 +82,8 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
 }
 
 void start_link_transmitter() {
+    // Initialize mutex
+    pthread_mutex_init(&datagrams_mutex, 0);
     // Initialize portaudio
     PaError err = Pa_Initialize();
     if (err != paNoError)

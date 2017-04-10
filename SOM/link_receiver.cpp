@@ -2,8 +2,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
 #include "portaudio.h"
 #include "link.hpp"
+
+#define MAX_DATAGRAMS (32) // should be a power of two to correctly handle unsigned overflow in the ring buffer (not that it will ever happen...)
+
+static pthread_mutex_t datagrams_mutex;
+static uint8_t datagrams[MAX_DATAGRAMS][DATAGRAM_SIZE];
+static uint32_t datagrams_beg = 0, datagrams_end = 0;
+
+bool receive_datagram(uint8_t* datagram) {
+    pthread_mutex_lock(&datagrams_mutex);
+    if (datagrams_beg == datagrams_end) {
+        pthread_mutex_unlock(&datagrams_mutex);
+        return false;
+    }
+    memcpy(datagram, datagrams[datagrams_beg%MAX_DATAGRAMS], DATAGRAM_SIZE);
+    ++datagrams_beg;
+    pthread_mutex_unlock(&datagrams_mutex);
+}
 
 float leftover_buffer[FRAME_REAL_SIZE_BITS];
 int leftover_buffer_size = 0;
@@ -93,7 +111,7 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         bool okay = true;
         for (int j = 0; j < FRAME_SYNCHRONIZATION_BYTES; ++j) {
             for (int k = 7; k >= 0; --k) {
-                const bool expected = (synchronization[j] >> k) & 1;
+                const bool expected = (link_synchronization_preamble[j] >> k) & 1;
                 okay &= *ptr++ == expected;
                 if (!okay)
                     goto next_iteration;
@@ -105,8 +123,9 @@ next_iteration:;
     }
     aligned = pattern_beg != -1;
     #endif
-    // Restore datagram
+    // Process datagram
     if (pattern_beg != -1) {
+        // Restore datagram
         const int datagram_beg = pattern_beg + FRAME_SYNCHRONIZATION_BITS;
         int datagram[DATAGRAM_SIZE];
         memset(datagram, 0, sizeof datagram);
@@ -115,6 +134,7 @@ next_iteration:;
                 datagram[i] |= (superframe[datagram_beg+i*8+7-j]) << j;
             }
         }
+        // Print datagram
         #if DISPLAY_DATAGRAM==1 || DISPLAY_DATAGRAM==2
         printf("datagram: ");
         for (int i = 0; i < DATAGRAM_SIZE; ++i) {
@@ -125,6 +145,13 @@ next_iteration:;
         exit(0);
         #endif
         #endif
+        // Save datagram
+        pthread_mutex_lock(&datagrams_mutex);
+        if (datagrams_end != datagrams_beg+MAX_DATAGRAMS) {
+            memcpy(datagrams[datagrams_end%MAX_DATAGRAMS], datagram, DATAGRAM_SIZE);
+            ++datagrams_end;
+        }
+        pthread_mutex_unlock(&datagrams_mutex);
     }
     // Update the leftover buffer
     if (pattern_beg == -1) {
