@@ -44,6 +44,14 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             frame[i] = link_synchronization_preamble[i];
         // Write datagram content
 #if DOUGLAS_ADAMS==1
+            // Randomly skip
+            if (rand()%2 == 0) {
+                for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
+                    *out++ = 0;
+                pthread_mutex_unlock(&datagrams_mutex);
+                return 0;
+            }
+            // Proceed
         if ((++iter)&1) {
             memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, "The Guide is definitive. Reality is frequently innacurate. In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move. Some more text here just in case someone decides to increase the datagram size even more. Some more text here just in case someone decides to increase the datagram size even more.", DATAGRAM_SIZE);
         } else {
