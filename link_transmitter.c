@@ -45,7 +45,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         // Write datagram content
 #if DOUGLAS_ADAMS==1
             // Randomly skip
-            if (rand()%2 == 0) {
+            if (rand()%2 == 500) { //
                 for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
                     *out++ = 0;
                 pthread_mutex_unlock(&datagrams_mutex);
