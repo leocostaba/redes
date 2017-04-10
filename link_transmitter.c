@@ -59,6 +59,14 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
                 *out++ = 0;
             return 0;
         } else {
+            // Randomly skip
+            if (rand()%2 == 0) {
+                for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
+                    *out++ = 0;
+                pthread_mutex_unlock(&datagrams_mutex);
+                return 0;
+            }
+            // Proceed
             printf("(link transmitter) sending a datagram\n");
             memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, datagrams[datagrams_beg%MAX_DATAGRAMS], DATAGRAM_SIZE);
             ++datagrams_beg;
