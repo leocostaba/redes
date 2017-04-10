@@ -42,7 +42,7 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
     for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
         if (fabs(buf[i]) > amplitude)
             amplitude = fabs(buf[i]);
-    const float avg2_cutoff = amplitude / sqrt(2);
+    const float avg2_cutoff = 0.8 * amplitude / sqrt(2);
     // Print the buffer
     #if 0
     for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
