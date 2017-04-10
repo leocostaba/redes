@@ -129,7 +129,7 @@ next_iteration:;
     if (pattern_beg != -1) {
         // Restore datagram
         const int datagram_beg = pattern_beg + FRAME_SYNCHRONIZATION_BITS;
-        int datagram[DATAGRAM_SIZE];
+        uint8_t datagram[DATAGRAM_SIZE];
         memset(datagram, 0, sizeof datagram);
         for (int i = 0; i < DATAGRAM_SIZE; ++i) {
             for (int j = 7; j >= 0; --j) {
