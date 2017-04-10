@@ -14,7 +14,7 @@
 #include <errno.h>
 #include <pthread.h>
 
-#define GO_BACK 2 // should be a power of two to correctly handle unsigned overflow in the ring buffer
+#define GO_BACK 1 // should be a power of two to correctly handle unsigned overflow in the ring buffer
 #define HEADER_SIZE 16
 #define MAX_PAYLOAD_SIZE 76
 #define SEGMENT_SIZE (HEADER_SIZE+MAX_PAYLOAD_SIZE)
