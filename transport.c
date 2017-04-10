@@ -170,7 +170,7 @@ void* start_event_loop(void* const conn_) {
                             send_segment(conn, response);
                         }
                     }
-                    sleep_ms(10);
+                    sleep_ms(1000);
                 }
                 // And finally exit
                 puts("(transport) Waited long enough, exiting...");
