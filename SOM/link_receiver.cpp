@@ -7,6 +7,7 @@
 
 float leftover_buffer[FRAME_REAL_SIZE_BITS];
 int leftover_buffer_size = 0;
+bool aligned = false;
 
 static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags statusFlags, void *userData)
 {
@@ -56,9 +57,9 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             }
             if (ones < FRAME_SINE_FREQUENCY/2)
                 ones = FRAME_SINE_FREQUENCY-ones;
-            value += ones*ones;
+            value += ones*ones*ones;
         }
-        if (value > best_alignment_value) {
+        if (((!aligned || best_alignment != 0) && value > best_alignment_value) || (value > best_alignment_value*1.3)) {
             best_alignment = alignment;
             best_alignment_value = value;
         }
@@ -102,6 +103,7 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         break;
 next_iteration:;
     }
+    aligned = pattern_beg != -1;
     #endif
     // Restore datagram
     if (pattern_beg != -1) {
