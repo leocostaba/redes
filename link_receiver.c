@@ -85,6 +85,50 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         }
     }
     printf("(link/receiver) alignment = %d, value = %d\n", best_alignment, best_alignment_value);
+    // Compute best alignment (2)
+    #if 0
+    #if DONT_LOOK_FOR_PATTERN==0
+    for (int alignment = 0; alignment < FRAME_MULTIPLIER; ++alignment) {
+        bool superframe[FRAME_SIZE_BITS];
+        bool* ptr = superframe;
+        for (int i = 0; alignment+i*FRAME_MULTIPLIER+FRAME_MULTIPLIER-1 < superbuf_size; ++i) {
+            float avg2 = 0;
+            for (int j = 0; j < FRAME_MULTIPLIER; ++j) {
+                float x = superbuf[alignment+i*FRAME_MULTIPLIER+j];
+                avg2 += x*x;
+            }
+            avg2 /= FRAME_MULTIPLIER;
+            avg2 *= 2*M_PI;
+            avg2 = sqrt(avg2);
+            *ptr++ = avg2 >= avg2_cutoff;
+        }
+        const int superframe_size = ptr - superframe;
+        // Search for the synchronization pattern
+        int pattern_beg = -1;
+        for (int i = 0; i+FRAME_SIZE_BITS <= superframe_size; ++i) {
+            ptr = superframe+i;
+            bool okay = true;
+            for (int j = 0; j < FRAME_SYNCHRONIZATION_BYTES; ++j) {
+                for (int k = 7; k >= 0; --k) {
+                    const bool expected = (link_synchronization_preamble[j] >> k) & 1;
+                    okay &= *ptr++ == expected;
+                    if (!okay)
+                        goto next_iteration1;
+                }
+            }
+            pattern_beg = i;
+            break;
+    next_iteration1:;
+        }
+        if (pattern_beg != -1) {
+            puts("found!");
+            best_alignment = alignment;
+            break;
+        }
+    }
+    #endif
+    printf("(link/receiver) alignment = %d, value = %d\n", best_alignment, best_alignment_value);
+    #endif
     // Build superframe
     bool superframe[FRAME_SIZE_BITS];
     bool* ptr = superframe;
