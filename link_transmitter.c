@@ -29,6 +29,7 @@ bool link_send(const uint8_t* datagram) {
 int iter = 0;
 static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags statusFlags, void *userData)
 {
+    float* out = (float*) outputBuffer;
     // Prevent unused variable warnings
     (void) timeInfo;
     (void) framesPerBuffer;
@@ -51,8 +52,12 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
 #else
         pthread_mutex_lock(&datagrams_mutex);
         if (datagrams_beg == datagrams_end) {
-            for (int i = 0; i < DATAGRAM_SIZE; ++i)
-                frame[FRAME_SYNCHRONIZATION_BYTES+i] = rand()%2;
+            /*for (int i = 0; i < DATAGRAM_SIZE; ++i)*/
+                /*frame[FRAME_SYNCHRONIZATION_BYTES+i] = rand()%2;*/
+            // skip
+            for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
+                *out++ = 0;
+            return 0;
         } else {
             printf("(link transmitter) sending a datagram\n");
             memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, datagrams[datagrams_beg%MAX_DATAGRAMS], DATAGRAM_SIZE);
@@ -61,8 +66,13 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         pthread_mutex_unlock(&datagrams_mutex);
 #endif
     }
+    // Randomly skip
+    if (rand()%2 == 0) {
+        for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
+            *out++ = 0;
+        return 0;
+    }
     // Convert frame into audio
-    float* out = (float*) outputBuffer;
     for (int i = 0; i < FRAME_SIZE; ++i) {
         //printf("frame[%d] = %d\n", i, frame[i]);
         for (int j = 7; j >= 0; --j) {

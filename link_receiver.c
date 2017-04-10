@@ -123,7 +123,8 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         break;
 next_iteration:;
     }
-    aligned = pattern_beg != -1;
+    if (pattern_beg != -1)
+        aligned = true;
     #endif
     // Process datagram
     if (pattern_beg != -1) {
