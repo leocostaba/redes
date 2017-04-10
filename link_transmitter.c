@@ -23,6 +23,7 @@ bool link_send(const uint8_t* datagram) {
     memcpy(datagrams[datagrams_end%MAX_DATAGRAMS], datagram, DATAGRAM_SIZE);
     ++datagrams_end;
     pthread_mutex_unlock(&datagrams_mutex);
+    return true;
 }
 
 int iter = 0;
@@ -30,6 +31,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
 {
     // Prevent unused variable warnings
     (void) timeInfo;
+    (void) framesPerBuffer;
     (void) statusFlags;
     (void) inputBuffer;
     (void) userData;
@@ -52,6 +54,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             for (int i = 0; i < DATAGRAM_SIZE; ++i)
                 frame[FRAME_SYNCHRONIZATION_BYTES+i] = rand()%2;
         } else {
+            printf("(link transmitter) sending a datagram\n");
             memcpy(frame+FRAME_SYNCHRONIZATION_BYTES, datagrams[datagrams_beg%MAX_DATAGRAMS], DATAGRAM_SIZE);
             ++datagrams_beg;
         }
@@ -82,13 +85,10 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
 }
 
 void* start_link_transmitter(void* p) {
+    PaError err = paNoError;
     (void) p;
     // Initialize mutex
     pthread_mutex_init(&datagrams_mutex, 0);
-    // Initialize portaudio
-    PaError err = Pa_Initialize();
-    if (err != paNoError)
-        goto error;
     // Setup output parameters
     PaStreamParameters outputParameters;
     outputParameters.device = Pa_GetDefaultOutputDevice(); /* default output device */
@@ -115,20 +115,19 @@ void* start_link_transmitter(void* p) {
     if (err != paNoError) goto error;
     err = Pa_CloseStream( stream );
     if (err != paNoError) goto error;
-    Pa_Terminate();
     // Exit
     exit(err);
 error:
-    Pa_Terminate();
-    fprintf( stderr, "An error occured while using the portaudio stream\n" );
-    fprintf( stderr, "Error number: %d\n", err );
-    fprintf( stderr, "Error message: %s\n", Pa_GetErrorText( err ) );
+    fprintf(stderr, "An error occured while using the portaudio stream\n");
+    fprintf(stderr, "Error number: %d\n", err);
+    fprintf(stderr, "Error message: %s\n", Pa_GetErrorText(err));
     exit(err);
 }
 
 #if DOUGLAS_ADAMS==1
 int main()
 {
+    Pa_Initialize();
     start_link_transmitter(0);
 }
 #endif

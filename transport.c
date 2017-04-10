@@ -1,4 +1,5 @@
 #include "transport.h"
+#include "network.h"
 #include "util.h"
 #include <stdio.h>
 #include <stdint.h>
@@ -13,9 +14,9 @@
 #include <errno.h>
 #include <pthread.h>
 
-#define GO_BACK 32 // should be a power of two to correctly handle unsigned overflow in the ring buffer
+#define GO_BACK 2 // should be a power of two to correctly handle unsigned overflow in the ring buffer
 #define HEADER_SIZE 16
-#define MAX_PAYLOAD_SIZE 1500
+#define MAX_PAYLOAD_SIZE 76
 #define SEGMENT_SIZE (HEADER_SIZE+MAX_PAYLOAD_SIZE)
 #define BUFFER_SIZE (1<<16) // should be a power of two to correctly handle unsigned overflow in the ring buffer
 
@@ -47,7 +48,6 @@ const char* const filename_clienttoserver = "/tmp/trabalho-redes-transporte-cts"
 
 struct Connection {
     uint8_t type;
-    int readpipe, writepipe;
     uint8_t server_status; // only used in the server
     uint8_t termination_status;
     uint32_t sender_nseq, receiver_nseq;
@@ -58,13 +58,13 @@ struct Connection {
     uint32_t read_buffer_beg, read_buffer_end;
     uint32_t write_buffer_beg, write_buffer_end;
     pthread_mutex_t read_buffer_mutex, write_buffer_mutex;
+    uint32_t local_address, remote_address;
 };
 
 enum {
     CONNECTION_TYPE_SERVER = 0,
     CONNECTION_TYPE_CLIENT = 1,
 };
-
 void* start_event_loop(void* conn);
 int validate_segment(uint8_t* buf);
 int send_segment(Connection* conn, uint8_t* buf);
@@ -74,36 +74,10 @@ void process_segment(Connection* conn, uint8_t* segment);
 void print_segment_type(uint32_t type);
 void free_connection(Connection* conn);
 
-Connection* start_server() {
-    // Establish the network-layer channel
-    if (access(filename_clienttoserver, F_OK) == -1) {
-        puts("(transport) Pipe \"client-to-server\" does not exist, creating it...");
-        if (mkfifo(filename_clienttoserver, 0666) != 0) {
-            puts("(transport) ERROR: Unable to create pipe \"client-to-server\"");
-            return 0;
-        }
-    }
-    if (access(filename_servertoclient, F_OK) == -1) {
-        puts("(transport) Pipe \"server-to-client\" does not exist, creating it...");
-        if (mkfifo(filename_servertoclient, 0666) != 0) {
-            puts("(transport) ERROR: Unable to create pipe \"server-to-client\"");
-            return 0;
-        }
-    }
+Connection* start_transport_server(const uint32_t local_address, const uint32_t remote_address) {
     puts("(transport) Starting server...");
-    puts("(transport) Opening read pipe...");
-    const int readpipe = open(filename_clienttoserver, O_RDONLY | O_NONBLOCK);
-    if (readpipe == -1)
-        return 0;
-    int writepipe;
-    puts("(transport) Opening write pipe...");
-    while ((writepipe = open(filename_servertoclient, O_WRONLY | O_NONBLOCK)) == -1) {
-        sleep_ms(10);
-    }
     Connection* conn = malloc(sizeof(Connection));
     conn->type = CONNECTION_TYPE_SERVER;
-    conn->readpipe = readpipe;
-    conn->writepipe = writepipe;
     conn->termination_status = TERMINATION_STATUS_ALIVE;
     conn->server_status = SERVER_STATUS_DISCONNECTED;
     conn->segments_beg = 0;
@@ -113,6 +87,8 @@ Connection* start_server() {
     conn->read_buffer_end = 0;
     conn->write_buffer_beg = 0;
     conn->write_buffer_end = 0;
+    conn->local_address = local_address;
+    conn->remote_address = remote_address;
     pthread_mutex_init(&conn->read_buffer_mutex, 0);
     pthread_mutex_init(&conn->write_buffer_mutex, 0);
     // Start event loop in a new thread
@@ -125,23 +101,11 @@ Connection* start_server() {
     return conn;
 }
 
-Connection* start_client() {
+Connection* start_transport_client(const uint32_t local_address, const uint32_t remote_address) {
     // Establish the network-layer channel
     puts("(transport) Starting client...");
-    puts("(transport) Opening write pipe...");
-    int writepipe = open(filename_clienttoserver, O_WRONLY | O_NONBLOCK);
-    if (writepipe == -1)
-        return 0;
-    puts("(transport) Opening read pipe...");
-    int readpipe = open(filename_servertoclient, O_RDONLY | O_NONBLOCK);
-    if (readpipe == -1) {
-        close(writepipe);
-        return 0;
-    }
     Connection* conn = malloc(sizeof(Connection));
     conn->type = CONNECTION_TYPE_CLIENT;
-    conn->readpipe = readpipe;
-    conn->writepipe = writepipe;
     conn->termination_status = TERMINATION_STATUS_ALIVE;
     conn->segments_beg = 0;
     conn->segments_end = 0;
@@ -150,6 +114,8 @@ Connection* start_client() {
     conn->read_buffer_end = 0;
     conn->write_buffer_beg = 0;
     conn->write_buffer_end = 0;
+    conn->local_address = local_address;
+    conn->remote_address = remote_address;
     // Send a special segment to initiate the transport-layer connection
     puts("(transport) Sending special handshake segment...");
     uint8_t segment[SEGMENT_SIZE];
@@ -160,7 +126,7 @@ Connection* start_client() {
         write_uint32(segment+4, SEGMENT_TYPE_INIT);
         write_uint32(segment+8, nseq);
         send_segment(conn, segment);
-        sleep_ms(10);
+        sleep_ms(1000);
         if (receive_segment(conn, segment) != 0 && validate_segment(segment) && read_uint32(segment+4) == SEGMENT_TYPE_INIT_ACK && read_uint32(segment+8) == nseq) {
             puts("(transport) Received INIT ACK");
             // Finish setting up the connection
@@ -277,13 +243,8 @@ int send_segment(Connection* const conn, uint8_t* const segment) {
             segment[s] ^= segment[i];
     // Send segment
     for (;;) {
-        const ssize_t bwritten = write(conn->writepipe, segment, SEGMENT_SIZE);
-        if (bwritten == SEGMENT_SIZE) {
+        if (!network_send(conn->local_address, conn->remote_address, segment)) {
             break;
-        }
-        if ((size_t) bwritten < SEGMENT_SIZE) {
-            puts("(transport) ERROR: unable to write enough bytes to the write pipe");
-            exit(2);
         }
         sleep_ms(5);
     }
@@ -291,22 +252,11 @@ int send_segment(Connection* const conn, uint8_t* const segment) {
 }
 
 int receive_segment(Connection* const conn, uint8_t* const buf) {
-    const ssize_t bread = read(conn->readpipe, buf, SEGMENT_SIZE);
-    if (bread == 0)
+    if (network_receive(conn->local_address, conn->remote_address, buf)) {
+        return SEGMENT_SIZE;
+    } else {
         return 0;
-    if (bread == -1) {
-        if (errno == EAGAIN) {
-            return 0;
-        } else {
-            printf("(transport) ERROR: receive_segment: bread = -1, errno = %d\n", errno);
-            exit(1);
-        }
     }
-    if ((size_t) bread < SEGMENT_SIZE) {
-        puts("(transport) ERROR: receive_segment: bread < SEGMENT_SIZE");
-        exit(2);
-    }
-    return bread;
 }
 
 void timer(Connection* const conn) {

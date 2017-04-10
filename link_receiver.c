@@ -21,6 +21,7 @@ bool link_receive(uint8_t* datagram) {
     memcpy(datagram, datagrams[datagrams_beg%MAX_DATAGRAMS], DATAGRAM_SIZE);
     ++datagrams_beg;
     pthread_mutex_unlock(&datagrams_mutex);
+    return true;
 }
 
 float leftover_buffer[FRAME_REAL_SIZE_BITS];
@@ -31,6 +32,7 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
 {
     // Prevent unused variable warnings
     (void) outputBuffer;
+    (void) framesPerBuffer;
     (void) timeInfo;
     (void) statusFlags;
     (void) userData;
@@ -82,7 +84,7 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             best_alignment_value = value;
         }
     }
-    printf("alignment = %d, value = %d\n", best_alignment, best_alignment_value);
+    printf("(link receiver) alignment = %d, value = %d\n", best_alignment, best_alignment_value);
     // Build superframe
     bool superframe[FRAME_SIZE_BITS];
     bool* ptr = superframe;
@@ -136,7 +138,7 @@ next_iteration:;
         }
         // Print datagram
         #if DISPLAY_DATAGRAM==1 || DISPLAY_DATAGRAM==2
-        printf("datagram: ");
+        printf("(link) datagram: ");
         for (int i = 0; i < DATAGRAM_SIZE; ++i) {
             putchar(datagram[i]);
         }
@@ -208,21 +210,19 @@ void* start_link_receiver(void* p) {
     if(err != paNoError)
         goto error;
     // Exit
-    return 0;
+    exit(0);
     // Handle errors
 error:
-    Pa_Terminate();
-    if(err != paNoError) {
-        fprintf(stderr, "An error occured while using the portaudio stream\n");
-        fprintf(stderr, "Error number: %d\n", err);
-        fprintf(stderr, "Error message: %s\n", Pa_GetErrorText(err));
-        exit(1);
-    }
+    fprintf(stderr, "An error occured while using the portaudio stream\n");
+    fprintf(stderr, "Error number: %d\n", err);
+    fprintf(stderr, "Error message: %s\n", Pa_GetErrorText(err));
+    exit(1);
 }
 
 #if COMPILE_RECEIVER_MAIN==1
 int main()
 {
+    Pa_Initialize();
     start_link_receiver(0);
 }
 #endif

@@ -1,4 +1,5 @@
 #include "transport.h"
+#include "link.h"
 #include "util.h"
 #include "constants.h"
 #include <stdio.h>
@@ -27,7 +28,7 @@ void run_get(const char* const local_filename, const char* const remote_filename
     memcpy(initial_message+3, remote_filename, remote_filename_len);
     initial_message[3+remote_filename_len] = '\0';
     // Start the connection
-    Connection* conn = start_client();
+    Connection* conn = start_transport_client(CLIENT_ADDRESS, SERVER_ADDRESS);
     if (!conn) {
         puts("(client) ERROR: unable to start the connection");
         exit(1);
@@ -100,7 +101,7 @@ void run_put(const char* const local_filename, const char* const remote_filename
     initial_message[3+remote_filename_len] = '\0';
     write_uint32(initial_message+MAX_REMOTE_FILENAME_LEN+3, file_length);
     // Start the connection
-    Connection* conn = start_client();
+    Connection* conn = start_transport_client(CLIENT_ADDRESS, SERVER_ADDRESS);
     if (!conn) {
         puts("(client) ERROR: unable to start the connection");
         exit(1);
@@ -143,6 +144,7 @@ int main(int argc, char** argv) {
         printf("(client) ERROR: expected 3 arguments, received %d\n", argc-1);
         return 1;
     }
+    link_start();
     if (strcmp(argv[1], "GET") == 0) {
         run_get(argv[2], argv[3]);
     } else if (strcmp(argv[1], "PUT") == 0) {

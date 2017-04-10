@@ -1,4 +1,5 @@
 #include "transport.h"
+#include "link.h"
 #include "util.h"
 #include "constants.h"
 #include <string.h>
@@ -31,7 +32,7 @@ void run_get(Connection* const conn, const uint8_t* const message) {
     puts("(server) Success opening the file: replying with the file length");
     write_uint32(response, 200);
     strcpy((char*) response+4, "OK");
-    write_uint32(response+204, file_length);
+    write_uint32(response+MAX_STATUS_MESSAGE_LEN+4, file_length);
     send_message_blocking(conn, response, MAX_STATUS_MESSAGE_LEN+8);
     // And then send the file contents
     puts("(server) Sending file contents...");
@@ -55,7 +56,7 @@ void run_put(Connection* const conn, const uint8_t* const message) {
     memcpy(filename, message+3, MAX_REMOTE_FILENAME_LEN);
     printf("(server) Opening file for read access: %s\n", filename);
     FILE* file = fopen(filename, "w");
-    uint32_t file_length = read_uint32(message+203);
+    uint32_t file_length = read_uint32(message+MAX_REMOTE_FILENAME_LEN+3);
     // If it fails, reply with a failure message and terminate the connection
     if (file == 0) {
         puts("(server) Unable to open the file: replying with failure");
@@ -98,10 +99,11 @@ void run_put(Connection* const conn, const uint8_t* const message) {
 }
 
 int main() {
+    link_start();
     for (;;) {
         puts("======================================================");
         puts("(server) Starting server...");
-        Connection* conn = start_server();
+        Connection* conn = start_transport_server(SERVER_ADDRESS, CLIENT_ADDRESS);
         if (!conn) {
             puts("(server) ERROR: unable to start the connection");
             return 1;
