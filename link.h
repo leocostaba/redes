@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 
 // Note: FRAME_MULTIPLIER must be a multiple of FRAME_SINE_FREQUENCY
 // Note: FRAME_MULTIPLIER should be even
@@ -17,5 +18,6 @@
 extern uint8_t link_synchronization_preamble[];
 
 // Link-layer API
-bool send_datagram(const uint8_t* datagram);
-bool receive_datagram(uint8_t* datagram);
+void link_start();
+bool link_send(const uint8_t* datagram);
+bool link_receive(uint8_t* datagram);

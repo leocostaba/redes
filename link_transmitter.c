@@ -6,7 +6,7 @@
 #include <string.h>
 #include <portaudio.h>
 #include <pthread.h>
-#include "link.hpp"
+#include "link.h"
 
 #define MAX_DATAGRAMS (32) // should be a power of two to correctly handle unsigned overflow in the ring buffer (not that it will ever happen...)
 
@@ -14,7 +14,7 @@ static pthread_mutex_t datagrams_mutex;
 static uint8_t datagrams[MAX_DATAGRAMS][DATAGRAM_SIZE];
 static uint32_t datagrams_beg = 0, datagrams_end = 0;
 
-bool send_datagram(const uint8_t* datagram) {
+bool link_send(const uint8_t* datagram) {
     pthread_mutex_lock(&datagrams_mutex);
     if (datagrams_end == datagrams_beg+MAX_DATAGRAMS) {
         pthread_mutex_unlock(&datagrams_mutex);
@@ -81,7 +81,8 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
     return paContinue;
 }
 
-void start_link_transmitter() {
+void* start_link_transmitter(void* p) {
+    (void) p;
     // Initialize mutex
     pthread_mutex_init(&datagrams_mutex, 0);
     // Initialize portaudio
@@ -128,6 +129,6 @@ error:
 #if DOUGLAS_ADAMS==1
 int main()
 {
-    start_link_transmitter();
+    start_link_transmitter(0);
 }
 #endif
