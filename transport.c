@@ -243,7 +243,7 @@ int send_segment(Connection* const conn, uint8_t* const segment) {
             segment[s] ^= segment[i];
     // Send segment
     for (;;) {
-        if (!network_send(conn->local_address, conn->remote_address, segment)) {
+        if (network_send(conn->local_address, conn->remote_address, segment)) {
             break;
         }
         sleep_ms(5);
