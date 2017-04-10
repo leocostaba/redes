@@ -42,7 +42,7 @@ void run_get(const char* const local_filename, const char* const remote_filename
     const uint32_t status_code = read_uint32(status_response);
     char status_message[MAX_STATUS_MESSAGE_LEN+1];
     memcpy(status_message, status_response+4, MAX_STATUS_MESSAGE_LEN);
-    const uint32_t file_length = read_uint32(status_response+204);
+    const uint32_t file_length = read_uint32(status_response+MAX_STATUS_MESSAGE_LEN+4);
     printf("(client) Status code: %u\n", (unsigned) status_code);
     printf("(client) Status message: %s\n", status_message);
     if (status_code != 200) {
@@ -98,7 +98,7 @@ void run_put(const char* const local_filename, const char* const remote_filename
     initial_message[2] = 'T';
     memcpy(initial_message+3, remote_filename, remote_filename_len);
     initial_message[3+remote_filename_len] = '\0';
-    write_uint32(initial_message+203, file_length);
+    write_uint32(initial_message+MAX_REMOTE_FILENAME_LEN+3, file_length);
     // Start the connection
     Connection* conn = start_client();
     if (!conn) {
