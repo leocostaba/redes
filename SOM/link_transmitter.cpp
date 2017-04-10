@@ -11,8 +11,6 @@
 
 uint8_t datagrams[MAX_DATAGRAMS][DATAGRAM_SIZE];
 uint32_t datagrams_beg = 0, datagrams_end = 0;
-bool parity = 0;
-int iter = 0;
 
 bool send_datagram(const uint8_t* datagram) {
     if (datagrams_end == datagrams_beg+MAX_DATAGRAMS) {
@@ -56,7 +54,6 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         printf("frame[%d] = %d\n", i, frame[i]);
         for (int j = 7; j >= 0; --j) {
             const bool bit = (frame[i] >> j) & 1;
-            //const bool bit = !last_bit; last_bit = bit;
             //const bool bit = 1;
             //const bool bit = 0;
             //const bool bit = (j%4)==0;
@@ -64,99 +61,10 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             //const bool bit = (j%4)>=2;
             //const bool bit = j>=4;
             printf("bit=%d\n", (int) bit);
-            //const float value = bit ? (parity ? 1 : -1) : (parity ? 0.5 : -0.5);
-#if 0
             for (int k = 0; k < FRAME_MULTIPLIER; ++k) {
-                float val = sin(2*3.14 * (iter++) / FRAME_MULTIPLIER / 3);
-                if (bit)
-                    val *= -1;
-                *out++ = val;
-            }
-#endif
-            // amplitude modulation (v1)
-            #if 0
-            for (int k = 0; k < FRAME_MULTIPLIER; ++k) {
-                *out++ = bit ? 1 : -1;
-            }
-            #endif
-
-            // frequency modularion
-            #if 0
-            iter = 0;
-            for (int k = 0; k < FRAME_MULTIPLIER; ++k) {
-                //float x = sin(2*3.14*(bit ? iter+= 1 : iter += 2)/FRAME_MULTIPLIER);
-                float a = 2*3.14*(iter+= 1)/FRAME_MULTIPLIER;
-                float x = sin(bit ? a : 2*a);
-                *out++ = x;
-            }
-            #endif
-
-            // amplitude modulation (v2)
-            #if 1
-            //iter=0;
-            for (int k = 0; k < FRAME_MULTIPLIER; ++k) {
-                float x = sin((double)2*3.14159265358979*k/FRAME_MULTIPLIER*FRAME_SINE_FREQUENCY);
+                float x = sin((double)2*M_PI*k/FRAME_MULTIPLIER*FRAME_SINE_FREQUENCY);
                 *out++ = bit ? x : 0;
             }
-            #endif
-
-#if 0
-            if (bit) {
-                for (int k = 0; k < FRAME_MULTIPLIER; ++k)
-                    *out++ = sin(2*3.14*(iter++)/FRAME_MULTIPLIER*5);
-            } else {
-                for (int k = 0; k < FRAME_MULTIPLIER; ++k)
-                    *out++ = 0;
-            }
-#endif
-            /*
-            for (int k = 0; k < FRAME_MULTIPLIER/4; ++k) {
-                *out++ = -1;
-            }
-            for (int k = 0; k < FRAME_MULTIPLIER/4; ++k) {
-                *out++ = +1;
-            }
-            if (bit) {
-                for (int k = 0; k < FRAME_MULTIPLIER/4; ++k) {
-                    *out++ = +1;
-                }
-                for (int k = 0; k < FRAME_MULTIPLIER/4; ++k) {
-                    *out++ = -1;
-                }
-            } else {
-                for (int k = 0; k < FRAME_MULTIPLIER/4; ++k) {
-                    *out++ = -1;
-                }
-                for (int k = 0; k < FRAME_MULTIPLIER/4; ++k) {
-                    *out++ = +1;
-                }
-            }
-            */
-            //for (int k = 0; k < FRAME_MULTIPLIER/2; ++k) {
-                //*out++ = value;
-            //}
-#if 0
-            for (int k = 0; k < FRAME_MULTIPLIER/2; ++k) {
-                //const float value = parity ? 1 : -1;
-                //const float value = bit ? (parity ? 1 : -1) : (parity ? 0.5 : -0.5);
-                //const float amp = bit ? 1 : 0.5;
-                //const float amp = 1;
-                //const float value = -amp + (2.0*amp*k/(FRAME_MULTIPLIER-1));
-                //*out++ = parity ? value : -value;
-                //if (bit) {
-                    //*out++ = parity ? -1 : +1;
-                //} else {
-                    //*out++ = parity ? -1 : +0;
-                //}
-                //parity = !parity;
-                //if (bit) {
-                    //*out++ = parity ? -1 : +1;
-                //} else {
-                    //*out++ = parity ? -1 : +0;
-                //}
-                //*out++ = value;
-            }
-#endif
         }
     }
     // Return value
