@@ -84,7 +84,7 @@ static int recordCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             best_alignment_value = value;
         }
     }
-    printf("(link receiver) alignment = %d, value = %d\n", best_alignment, best_alignment_value);
+    printf("(link/receiver) alignment = %d, value = %d\n", best_alignment, best_alignment_value);
     // Build superframe
     bool superframe[FRAME_SIZE_BITS];
     bool* ptr = superframe;
@@ -138,7 +138,7 @@ next_iteration:;
         }
         // Print datagram
         #if DISPLAY_DATAGRAM==1 || DISPLAY_DATAGRAM==2
-        printf("(link) datagram: ");
+        printf("(link/receiver) datagram: ");
         for (int i = 0; i < DATAGRAM_SIZE; ++i) {
             putchar(datagram[i]);
         }
@@ -146,6 +146,8 @@ next_iteration:;
         #if DISPLAY_DATAGRAM==2
         exit(0);
         #endif
+        #else
+        puts("(link/receiver) received datagram");
         #endif
         // Save datagram
         pthread_mutex_lock(&datagrams_mutex);
