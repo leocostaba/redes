@@ -53,7 +53,6 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             //++datagrams_beg; //temporarily commented
         }
 #endif
-        // Write checksum (TODO)
     }
     // Convert frame into audio
     puts("aqui");
