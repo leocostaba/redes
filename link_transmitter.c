@@ -57,6 +57,7 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
             // skip
             for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
                 *out++ = 0;
+            pthread_mutex_unlock(&datagrams_mutex);
             return 0;
         } else {
             // Randomly skip
@@ -73,12 +74,6 @@ static int patestCallback(const void *inputBuffer, void *outputBuffer, unsigned 
         }
         pthread_mutex_unlock(&datagrams_mutex);
 #endif
-    }
-    // Randomly skip
-    if (rand()%2 == 0) {
-        for (int i = 0; i < FRAME_REAL_SIZE_BITS; ++i)
-            *out++ = 0;
-        return 0;
     }
     // Convert frame into audio
     for (int i = 0; i < FRAME_SIZE; ++i) {
