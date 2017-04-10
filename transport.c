@@ -214,7 +214,7 @@ void* start_event_loop(void* const conn_) {
         // Call the timer (every 10ms or so)
         timer(conn);
         // Wait for new segments to arrive
-        sleep_ms(10);
+        sleep_ms(1000);
     }
     // Connection closed successfully
     return 0;
