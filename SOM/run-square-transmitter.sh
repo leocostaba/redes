@@ -1,5 +1,5 @@
 #!/bin/bash
 set -e
 
-./compile-square-transmitter.sh
-./square-transmitter
+g++ square.cpp -lrt -lm -lasound -lportaudio -pthread -o /tmp/square-transmitter
+/tmp/square-transmitter
